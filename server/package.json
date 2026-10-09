@@ -1,0 +1,15 @@
+{
+  "name": "deskmate-server",
+  "version": "1.0.0",
+  "description": "Deskmate presence + WebRTC signaling server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "type": "module"
+}

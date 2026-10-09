@@ -1,0 +1,7 @@
+node_modules/
+companion/app/
+companion/dist/
+test/shots/
+*.zip
+.DS_Store
+.env

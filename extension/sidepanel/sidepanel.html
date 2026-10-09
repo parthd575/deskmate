@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deskmate</title>
+  <link rel="stylesheet" href="../lib/ui.css">
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <!-- ===== Main desk view ===== -->
+  <main id="desk" hidden>
+    <header class="top">
+      <div class="team">
+        <span class="conn" id="conn" title="Connection"></span>
+        <div>
+          <div class="team-name" id="teamName">Team</div>
+          <div class="team-sub" id="teamSub">Connecting…</div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="icon-btn" id="copyCode" title="Copy team code to invite someone" aria-label="Invite">
+          <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+        </button>
+        <button class="icon-btn" id="openSettings" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="stage" id="stage">
+      <div class="stage-hint" id="stageHint">Drag to look around · scroll to zoom</div>
+      <div class="reactions" id="reactions">
+        <button data-emoji="👋" title="Wave to everyone">👋</button>
+        <button data-emoji="👍">👍</button>
+        <button data-emoji="🎉">🎉</button>
+        <button data-emoji="☕" title="Coffee anyone?">☕</button>
+        <button data-emoji="😂">😂</button>
+      </div>
+      <div class="card pop" id="personCard" hidden></div>
+    </section>
+
+    <section class="me-bar">
+      <div class="seg" id="quick" role="radiogroup" aria-label="My status"></div>
+      <div class="me-meta" id="meMeta"></div>
+    </section>
+
+    <section class="help-box" id="helpBox"></section>
+
+    <section class="feed" id="feed"></section>
+
+    <section class="people">
+      <div class="section-title"><span>Team</span><span id="counts" class="muted"></span></div>
+      <ul id="people"></ul>
+    </section>
+  </main>
+
+  <!-- ===== Setup / settings ===== -->
+  <main id="setup" hidden>
+    <header class="top">
+      <div class="team">
+        <div class="logo">🪑</div>
+        <div>
+          <div class="team-name" id="setupTitle">Join your team desk</div>
+          <div class="team-sub">Takes 20 seconds.</div>
+        </div>
+      </div>
+      <button class="icon-btn" id="closeSettings" title="Back" aria-label="Back" hidden>
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <form id="setupForm" class="form">
+      <div class="avatar-edit">
+        <div class="avatar-preview" id="avatarPreview"></div>
+        <div class="avatar-pickers">
+          <label>Pick your character</label>
+          <div class="char-grid" id="charGrid" role="radiogroup" aria-label="Character"></div>
+        </div>
+      </div>
+      <label>Your name<input name="name" required maxlength="40" autocomplete="name"></label>
+      <label>Work email<input name="email" type="email" maxlength="120" autocomplete="email"></label>
+      <label>Team code<input name="team" required maxlength="64" placeholder="e.g. design-squad" autocomplete="off"></label>
+      <details id="advanced">
+        <summary>Advanced</summary>
+        <label>Server URL<input name="server" required placeholder="wss://deskmate.yourcompany.com"></label>
+        <div class="row2">
+          <label>Away after (min)<input name="idleMinutes" type="number" min="1" max="120"></label>
+          <label>Lunch length (min)<input name="lunchMinutes" type="number" min="5" max="180"></label>
+        </div>
+        <label class="check"><input type="checkbox" name="gchat"><span>Sync my Google Chat status<span class="muted small" id="gchatNote"></span></span></label>
+        <label>Calls open in
+          <select name="callApp">
+            <option value="meet">Google Meet</option>
+            <option value="builtin">Built-in audio (no Google account)</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" name="bubbles"> Show help pop-ups on the page I'm viewing</label>
+        <label class="check"><input type="checkbox" name="autoBack"> Mark me back at desk when I return from lunch</label>
+      </details>
+      <button class="btn primary big" type="submit" id="saveBtn">Join desk</button>
+      <p class="muted small" id="setupErr"></p>
+    </form>
+  </main>
+
+  <div class="toast" id="toast" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

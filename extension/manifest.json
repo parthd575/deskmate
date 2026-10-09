@@ -1,0 +1,102 @@
+{
+  "manifest_version": 3,
+  "name": "Deskmate \u2014 your team's virtual desk",
+  "short_name": "Deskmate",
+  "version": "0.1.0",
+  "description": "See who's at their desk, at lunch or away on a live 3D team desk. Ask for help and jump into an audio huddle in one click.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Deskmate",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "options_page": "sidepanel/sidepanel.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "idle",
+    "notifications",
+    "sidePanel",
+    "alarms",
+    "identity",
+    "identity.email"
+  ],
+  "host_permissions": [
+    "https://chat.googleapis.com/*",
+    "https://meet.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "bubble/*",
+        "lib/*",
+        "models/*"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+D"
+      },
+      "description": "Open the team desk"
+    },
+    "ask-help": {
+      "suggested_key": {
+        "default": "Alt+Shift+H"
+      },
+      "description": "Ask the team for help (press again to cancel)"
+    },
+    "toggle-lunch": {
+      "suggested_key": {
+        "default": "Alt+Shift+L"
+      },
+      "description": "Going to lunch / back from lunch"
+    },
+    "toggle-focus": {
+      "suggested_key": {
+        "default": "Alt+Shift+F"
+      },
+      "description": "Focus mode on / off"
+    }
+  },
+  "oauth2": {
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/chat.users.availability.readonly"
+    ]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

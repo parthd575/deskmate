@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>three.js model check</title>
+<style>html,body{margin:0;height:100%;background:#eef1f6}</style></head>
+<body><script type="module">
+// Shows the model from extension/models in each Deskmate state: idle, walk, sit+type, wave, raise.
+import * as THREE from '../extension/lib/three.module.min.js';
+import { createMixamoAvatar, loadManifest } from '../extension/lib/mixamo.js';
+import { addSoftLights, configureRenderer } from '../extension/lib/avatar.js';
+const q = new URLSearchParams(location.search);
+const r = new THREE.WebGLRenderer({ antialias: true }); r.setPixelRatio(Number(q.get('dpr') || 1.5)); r.setSize(innerWidth, innerHeight);
+configureRenderer(r); r.shadowMap.enabled = true; document.body.appendChild(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#eef1f6'); addSoftLights(scene);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(6, 64), new THREE.MeshStandardMaterial({ color: '#e3e7ef' }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const manifest = await loadManifest();
+const states = (q.get('s') || 'stand:idle,walk:idle,sit:type,stand:wave,sit:raise').split(',');
+const people = []; window.people = people;
+const box = (w, h, d, c) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: c }));
+states.forEach((st, i) => {
+  const [pose, act] = st.split(':');
+  const a = createMixamoAvatar(manifest, { model: (q.get('m') || '').split(',')[i] || manifest.characters[i % manifest.characters.length].id });
+  a.pose = pose; a.activity = act;
+  const x = (i - (states.length - 1) / 2) * 1.05;
+  a.root.position.x = x; a.root.rotation.y = -0.3; scene.add(a.root); people.push(a);
+  if (pose === 'sit') {
+    const g = new THREE.Group(); g.position.x = x; g.rotation.y = -0.3; scene.add(g);
+    const seat = box(0.48, 0.06, 0.46, '#9aa3b5'); seat.position.set(0, 0.44, -0.05); g.add(seat);
+    if (act === 'type') {
+      const desk = box(0.9, 0.04, 0.5, '#fdfcf8'); desk.position.set(0, 0.74, 0.5); g.add(desk);
+      const lap = box(0.36, 0.015, 0.24, '#c9ced8'); lap.position.set(0, 0.77, 0.4); g.add(lap);
+      const lid = box(0.36, 0.24, 0.012, '#c9ced8'); lid.position.set(0, 0.89, 0.53); lid.rotation.x = 0.2; g.add(lid);
+    }
+  }
+});
+const cam = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 50);
+cam.position.set(0.6, 1.7, 7.2); cam.lookAt(0, 0.85, 0);
+const clock = new THREE.Clock(); let t = 0;
+(function loop() { const dt = Math.min(clock.getDelta(), 0.1); t += dt; people.forEach(p => p.update(t, dt)); r.render(scene, cam); requestAnimationFrame(loop); })();
+const wait = setInterval(() => { if (people.every(p => p.ready || p.failed)) { clearInterval(wait); window.__ready = true; window.__failed = people.filter(p => p.failed).length; } }, 100);
+</script></body></html>

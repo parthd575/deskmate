@@ -1,0 +1,37 @@
+{
+  "name": "deskmate-companion",
+  "productName": "Deskmate",
+  "version": "0.1.0",
+  "description": "Deskmate menu-bar app: your team's virtual desk, always one click away.",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "sync": "node scripts/sync.mjs",
+    "start": "node scripts/sync.mjs && electron .",
+    "dist": "node scripts/sync.mjs && electron-builder --mac"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "uk.co.elevationservices.deskmate",
+    "productName": "Deskmate",
+    "files": ["main.js", "macfocus.js", "preload.cjs", "app/**", "assets/**", "package.json"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.png",
+      "target": ["dmg", "zip"],
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSMicrophoneUsageDescription": "Deskmate uses the microphone for audio huddles with your team."
+      },
+      "hardenedRuntime": true,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist"
+    }
+  }
+}

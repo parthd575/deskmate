@@ -1,0 +1,73 @@
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f1f3f7;
+  --line: #e5e8ee;
+  --text: #14161b;
+  --muted: #6b7280;
+  --accent: #4f6bff;
+  --accent-ink: #ffffff;
+  --danger: #ef4444;
+  --help: #f43f5e;
+  --ok: #22c55e;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 8px 24px rgba(16, 24, 40, .08);
+  --radius: 14px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161b;
+    --surface: #1c1f26;
+    --surface-2: #242832;
+    --line: #2d313b;
+    --text: #eef0f4;
+    --muted: #9aa1ad;
+    --accent: #7b8fff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .35);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
+  padding: 7px 12px; font-weight: 550; transition: transform .08s ease, background .15s ease, box-shadow .15s ease;
+}
+.btn:hover { background: var(--surface-2); }
+.btn:active { transform: scale(.97); }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.help { background: var(--help); border-color: transparent; color: #fff; }
+.btn.ghost { background: transparent; border-color: transparent; }
+.btn.big { padding: 11px 14px; font-size: 14px; border-radius: 12px; width: 100%; }
+.btn:disabled { opacity: .5; cursor: default; }
+
+.icon-btn {
+  width: 32px; height: 32px; border-radius: 10px; border: 0; background: transparent;
+  display: grid; place-items: center; color: var(--muted);
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.av {
+  --c: #6c8cff;
+  width: 30px; height: 30px; border-radius: 50%; flex: none; position: relative;
+  display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff;
+  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--c) 70%, white), var(--c));
+}
+.av .ring {
+  position: absolute; right: -2px; bottom: -2px; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--s, var(--ok)); border: 2px solid var(--surface);
+}

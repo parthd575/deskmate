@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Avatar gallery</title>
+<style>body{margin:0;background:#eef1f6;font:12px system-ui} canvas{display:block}</style></head>
+<body>
+<script type="module">
+// Dev page: every pose/style side by side. Serve the repo root (python3 -m http.server) and open /test/gallery.html
+import { THREE, createAvatar, addSoftLights, configureRenderer } from '../extension/lib/avatar.js';
+const W = innerWidth, H = innerHeight;
+const r = new THREE.WebGLRenderer({ antialias: true });
+r.setPixelRatio(2); r.setSize(W, H); r.shadowMap.enabled = true;
+configureRenderer(r); r.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(r.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#eef1f6');
+addSoftLights(scene);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: '#e6e9f0', roughness: 1 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+const q = new URLSearchParams(location.search);
+const cfgs = [
+  { color: '#22C55E', skin: '#F5D0B5', hair: '#2B2118', style: 'short', pose: 'sit', activity: 'type' },
+  { color: '#EC4899', skin: '#C68B62', hair: '#2B2118', style: 'long', pose: 'stand', activity: 'raise' },
+  { color: '#2F6FD6', skin: '#F5D0B5', hair: '#5A3825', style: 'spiky', glasses: 'sunglasses', pose: 'stand', activity: 'cross' },
+  { color: '#A78BFA', skin: '#8D5A3B', hair: '#2B2118', style: 'bun', pose: 'sit', activity: 'eat' },
+  { color: '#F59E0B', skin: '#E8B48F', hair: '#5A3825', style: 'curly', pose: 'sit', activity: 'talk' },
+  { color: '#E8EAEE', skin: '#F5D0B5', hair: '#5A3825', style: 'short', pose: 'stand', activity: 'wave' },
+];
+const avs = cfgs.map((c, i) => {
+  const a = createAvatar(c);
+  a.pose = c.pose; a.activity = c.activity;
+  a.root.position.x = (i - (cfgs.length - 1) / 2) * 1.0;
+  if (i === 4) a.setHeadphones(true, true);
+  scene.add(a.root);
+  return a;
+});
+// desk + laptop stand-in for the typist
+const desk = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 0.6), new THREE.MeshStandardMaterial({ color: '#fdfcf8' }));
+desk.position.set(avs[0].root.position.x, 0.76, 0.55); scene.add(desk);
+const base = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.018, 0.28), new THREE.MeshStandardMaterial({ color: '#d5dae3' }));
+base.position.set(avs[0].root.position.x, 0.795, 0.34); scene.add(base);
+const zoom = Number(q.get('zoom') || 1);
+const cam = new THREE.PerspectiveCamera(28, W / H, 0.1, 50);
+const view = q.get('view') || 'front';
+const fx = Number(q.get('x') || 0);
+if (view === 'side') cam.position.set(fx + 3 / zoom, 1.5, 1.8 / zoom); else cam.position.set(fx, Number(q.get('cy') || 1.9), 8.5 / zoom);
+cam.lookAt(fx, Number(q.get('y') || 0.95), 0);
+const clock = new THREE.Clock(); let t = Number(q.get('t') || 0);
+function loop() { const dt = Math.min(clock.getDelta(), 0.1); t += dt; for (const a of avs) a.update(t, dt); r.render(scene, cam); requestAnimationFrame(loop); }
+loop();
+window.__ready = true;
+</script>
+</body></html>
