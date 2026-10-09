@@ -14,12 +14,12 @@ fs.mkdirSync(OUT, { recursive: true });
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
 const BOTS = [
-  { name: 'Priya Shah', color: '#EC4899', avatar: { skin: '#C68B62', hair: '#2B2118', style: 'long' }, status: { state: 'desk' } },
-  { name: 'Tom Becker', color: '#2F6FD6', avatar: { skin: '#F5D0B5', hair: '#5A3825', style: 'spiky', glasses: 'sunglasses' }, status: { state: 'lunch', until: Date.now() + 25 * 60000 } },
-  { name: 'Aisha Khan', color: '#A78BFA', avatar: { skin: '#8D5A3B', hair: '#2B2118', style: 'bun' }, status: { state: 'dnd', message: 'Q4 report' } },
-  { name: 'Leo Martins', color: '#F59E0B', avatar: { skin: '#E8B48F', hair: '#5A3825', style: 'curly' }, status: { state: 'afk' } },
-  { name: 'Mei Lin', color: '#14B8A6', avatar: { skin: '#F5D0B5', hair: '#2B2118', style: 'long' }, status: { state: 'desk' } },
-];
+  { name: 'Priya', color: '#EC4899', avatar: { model: 'knight' }, status: { state: 'desk' } },
+  { name: 'Tom', color: '#2F6FD6', avatar: { model: 'mage' }, status: { state: 'lunch', until: Date.now() + 25 * 60000 } },
+  { name: 'Aisha', color: '#A78BFA', avatar: { model: 'barbarian' }, status: { state: 'dnd', message: 'Q4 report' } },
+  { name: 'Leo', color: '#F59E0B', avatar: { model: 'rogue' }, status: { state: 'brb' } },
+  { name: 'Mei', color: '#14B8A6', avatar: { model: 'hooded' }, status: { state: 'desk' } },
+]
 
 function bot(b, i) {
   return new Promise((resolve) => {
@@ -50,10 +50,11 @@ function bot(b, i) {
   const id = sw.url().split('/')[2];
   const page = await ctx.newPage();
   page.on('pageerror', e => console.log('[pageerror]', e.message));
-  await page.setViewportSize({ width: 400, height: 860 });
+  await page.setViewportSize({ width: 400, height: 900 });
   await page.goto(`chrome-extension://${id}/sidepanel/sidepanel.html`);
   await page.waitForSelector('#setup:not([hidden])');
-  await wait(1200);
+  await page.fill('input[name=name]', 'Parth Dave');
+  await wait(4000); // character models load
   await page.screenshot({ path: `${OUT}/00-setup.png` });
   await page.fill('input[name=name]', 'Parth Dave');
   await page.fill('input[name=email]', 'parth.dave@elevationservices.co.uk');
@@ -62,7 +63,7 @@ function bot(b, i) {
   await page.fill('input[name=server]', SERVER);
   await page.click('#saveBtn');
   await page.waitForSelector('#desk:not([hidden])');
-  await wait(1500);
+  await wait(16000); // models load, everyone walks to their seat, Leo walks to the corner and the BRB box drops
 
   // Priya asks for help, Mei and Priya... Mei raises a reaction
   bots[0].send(JSON.stringify({ type: 'help', topic: 'Can someone pair on the Stripe webhook bug?' }));
@@ -81,10 +82,10 @@ function bot(b, i) {
   await web.goto(SERVER.replace(/^ws/, 'http') + '/');
   await web.bringToFront();
   await wait(500);
-  bots[4].send(JSON.stringify({ type: 'call:invite', to: 'parth.dave@elevationservices.co.uk', callId: 'demo-call' }));
-  await web.waitForSelector('iframe[title=Deskmate]', { timeout: 20000 }).catch(() => console.log('no invite bubble'));
-  await wait(2500);
-  await web.screenshot({ path: `${OUT}/12-invite-bubble.png` });
+  bots[4].send(JSON.stringify({ type: 'help', topic: 'Review my PR before the release?' }));
+  await web.waitForSelector('iframe[title=Deskmate]', { timeout: 20000 }).catch(() => console.log('no help bubble'));
+  await wait(3000);
+  await web.screenshot({ path: `${OUT}/12-help-bubble.png` });
 
   await ctx.close();
   bots.forEach(b => b.close());

@@ -2,16 +2,17 @@
   "name": "deskmate",
   "private": true,
   "version": "0.1.0",
-  "description": "Deskmate — your team's virtual 3D desk (Chrome extension + Mac menu-bar app + presence server)",
+  "description": "Deskmate \u2014 your team's virtual 3D desk (Chrome extension + Mac menu-bar app + presence server)",
   "scripts": {
     "server": "cd server && npm start",
-    "test": "node --test test/server.test.mjs",
+    "test": "node --test test/server.test.mjs test/macfocus.test.mjs",
     "test:e2e": "node test/e2e.cjs",
     "demo": "node test/demo.cjs",
     "demo:live": "node test/demo.cjs --live",
     "mac": "cd companion && npm start",
     "mac:dist": "cd companion && npm run dist",
-    "zip:extension": "cd extension && zip -r ../deskmate-extension.zip . -x '*.DS_Store'"
+    "zip:extension": "cd extension && zip -r ../deskmate-extension.zip . -x '*.DS_Store'",
+    "test:meet": "node test/meet.cjs"
   },
   "devDependencies": {
     "playwright": "^1.56.0"
