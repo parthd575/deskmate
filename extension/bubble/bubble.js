@@ -3,6 +3,8 @@ import { THREE, addSoftLights, configureRenderer } from '../lib/avatar.js';
 import { makeCharacter, usingModels } from '../lib/characters.js';
 
 const data = JSON.parse(decodeURIComponent(location.hash.slice(1) || '%7B%7D'));
+// the Mac app asks its bubble to play the sound (the Chrome extension plays it from the background)
+if (data.chime) import('../lib/chime.js').then(m => m.playChime(data.chime)).catch(() => {});
 const $ = (s) => document.querySelector(s);
 const bridge = globalThis.deskBridge || {
   action: (name, args) => chrome.runtime.sendMessage({ type: 'action', name, args }),
@@ -22,6 +24,18 @@ const KINDS = {
     sub: 'Tap Join to hop on an audio call',
     acts: [['primary', 'Join', () => { bridge.action('call:accept', { callId: data.id, from: data.from, url: data.url }); close(); }], ['ghost', 'Not now', () => { bridge.action('call:decline', { callId: data.id, from: data.from }); close(); }]],
     pose: 'raise', ttl: 45, pulse: true,
+  },
+  kudos: {
+    title: `${data.name} sent you kudos 👏`,
+    sub: 'Your desk plant grew a little 🌱',
+    acts: [],
+    pose: 'wave', ttl: 7,
+  },
+  standup: {
+    title: 'Stand-up time 🧍',
+    sub: 'The team is gathering on the desk',
+    acts: [['primary', 'Open the desk', () => { bridge.action('open-desk', {}); close(); }]],
+    pose: 'wave', ttl: 20,
   },
   wave: {
     title: `${data.name} waved ${data.emoji || '👋'}`,

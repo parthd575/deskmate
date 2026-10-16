@@ -33,10 +33,10 @@
     "sidePanel",
     "alarms",
     "identity",
-    "identity.email"
+    "identity.email",
+    "offscreen"
   ],
   "host_permissions": [
-    "https://chat.googleapis.com/*",
     "https://meet.google.com/*"
   ],
   "content_scripts": [
@@ -58,6 +58,17 @@
         "content/meet.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chat.google.com/*",
+        "https://mail.google.com/*"
+      ],
+      "js": [
+        "content/gchat.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
@@ -98,12 +109,6 @@
       },
       "description": "Focus mode on / off"
     }
-  },
-  "oauth2": {
-    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/chat.users.availability.readonly"
-    ]
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

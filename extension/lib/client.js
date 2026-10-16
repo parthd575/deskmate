@@ -26,7 +26,7 @@ export class DeskClient {
   }
 
   #empty() {
-    return { conn: 'idle', error: null, socketId: null, me: null, members: {}, helps: {}, calls: [], iceServers: [] };
+    return { conn: 'idle', error: null, socketId: null, me: null, members: {}, helps: {}, calls: [], iceServers: [], teamCfg: { standup: null }, standup: null };
   }
 
   // ---- subscription ----
@@ -48,6 +48,8 @@ export class DeskClient {
       calls: st.calls,
       iceServers: st.iceServers,
       team: this.settings.team,
+      teamCfg: st.teamCfg,        // team-wide settings (stand-up schedule)
+      standup: st.standup,        // the stand-up happening right now, if any
     };
   }
 
@@ -73,8 +75,9 @@ export class DeskClient {
       const s = this.settings;
       this.#send({
         type: 'hello', team: s.team, role: this.role,
-        user: { id: s.userId, name: s.name, email: s.email, color: s.color, avatar: s.avatar, tz: s.tz },
+        user: { id: s.userId, name: s.name, email: s.email, color: s.color, avatar: s.avatar, tz: s.tz, plant: s.plant || 0 },
         status: this.pendingStatus || undefined,
+        weather: this.weather || undefined,
       });
       clearInterval(this.pingTimer);
       // exactly '{"type":"ping"}': the Cloudflare server answers it without waking up
@@ -135,6 +138,8 @@ export class DeskClient {
         st.helps = Object.fromEntries(msg.helps.map(h => [h.id, h]));
         st.calls = msg.calls;
         st.iceServers = msg.iceServers;
+        st.teamCfg = msg.teamCfg || { standup: null };
+        st.standup = msg.standup || null;
         // re-assert the status we had before a reconnect
         if (this.pendingStatus && msg.me.state !== this.pendingStatus.state) {
           this.#send({ type: 'status', ...this.pendingStatus });
@@ -191,6 +196,25 @@ export class DeskClient {
         st.calls = msg.calls;
         this.#emit();
         return;
+      case 'team':
+        st.teamCfg = msg.teamCfg;
+        this.#emit();
+        this.#event(msg);
+        return;
+      case 'standup': {
+        const prev = st.standup;
+        st.standup = msg.standup;
+        this.#emit();
+        this.#event({ ...msg, prev, inIt: !!(msg.standup && st.me && msg.standup.order.includes(st.me.id)) });
+        return;
+      }
+      case 'kudos':
+      case 'grow':
+        this.#event({ ...msg, toMe: st.me && (msg.to === st.me.id || msg.userId === st.me.id) });
+        return;
+      case 'kudos:wait':
+        this.#event(msg);
+        return;
       case 'wave':
       case 'react':
       case 'call:invite':
@@ -235,6 +259,12 @@ export class DeskClient {
   claimHelp(id) { this.#send({ type: 'help:claim', id }); }
   wave(to, emoji) { this.#send({ type: 'wave', to, emoji }); }
   react(emoji) { this.#send({ type: 'react', emoji }); }
+  kudos(to) { this.#send({ type: 'kudos', to }); }
+  setWeather(w) { this.weather = w; this.#send({ type: 'weather', weather: w }); }
+  setStandup(standup) { this.#send({ type: 'standup:config', standup }); }
+  standupStart() { this.#send({ type: 'standup:start' }); }
+  standupNext() { this.#send({ type: 'standup:next' }); }
+  standupEnd() { this.#send({ type: 'standup:end' }); }
   invite(to, callId, url) { this.#send({ type: 'call:invite', to, callId, url }); }
   shareMeet(id, url) { this.#send({ type: 'help:meet', id, url }); }
   decline(to, callId) { this.#send({ type: 'call:decline', to, callId }); }

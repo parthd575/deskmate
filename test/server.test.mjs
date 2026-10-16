@@ -163,3 +163,62 @@ test('help:end by Meet URL closes only a request I am part of', async () => {
   assert.equal(last(asker, 'help:closed').reason, 'ended');
   [asker, helper, other].forEach(w => w.close());
 });
+
+test('helping and kudos grow your plant; kudos are rate-limited', async () => {
+  const a = await client('t11', 'a@x.com');
+  const b = await client('t11', 'b@x.com');
+  send(a, { type: 'help', topic: 'x' });
+  await wait(80);
+  send(b, { type: 'help:claim', id: last(b, 'help:new').help.id });
+  await wait(80);
+  assert.equal(last(a, 'presence', m => m.member.id === 'b@x.com').member.plant, 1);
+  assert.equal(last(a, 'grow').reason, 'help');
+  send(a, { type: 'kudos', to: 'b@x.com' });
+  await wait(80);
+  assert.equal(last(b, 'kudos').from, 'a@x.com');
+  assert.equal(last(a, 'presence', m => m.member.id === 'b@x.com').member.plant, 2);
+  send(a, { type: 'kudos', to: 'b@x.com' });   // too soon
+  await wait(80);
+  assert.ok(last(a, 'kudos:wait'));
+  send(a, { type: 'kudos', to: 'a@x.com' });   // not yourself
+  await wait(80);
+  assert.equal(last(a, 'presence', m => m.member.id === 'a@x.com')?.member.plant ?? 0, 0);
+  [a, b].forEach(w => w.close());
+});
+
+test('stand-up: schedule, skips people away / at lunch / on leave, turns, end', async () => {
+  const a = await client('t12', 'ann@x.com');
+  const b = await client('t12', 'bob@x.com');
+  const c = await client('t12', 'cat@x.com');
+  const d = await client('t12', 'dan@x.com');
+  send(c, { type: 'status', state: 'lunch' });
+  send(d, { type: 'status', state: 'leave' });
+  send(a, { type: 'standup:config', standup: { enabled: true, time: '09:30', days: [1, 2, 3, 4, 5], tz: 'Europe/London', perPerson: 60 } });
+  await wait(100);
+  assert.equal(last(b, 'team').teamCfg.standup.time, '09:30');
+  send(b, { type: 'standup:start' });
+  await wait(100);
+  const su = last(a, 'standup').standup;
+  assert.deepEqual(su.order, ['ann@x.com', 'bob@x.com']);
+  assert.equal(su.turn, 0);
+  send(c, { type: 'status', state: 'desk' });          // back from lunch: joins the end of the line
+  await wait(100);
+  assert.deepEqual(last(a, 'standup').standup.order, ['ann@x.com', 'bob@x.com', 'cat@x.com']);
+  send(a, { type: 'standup:next' });
+  await wait(80);
+  assert.equal(last(a, 'standup').standup.turn, 1);
+  send(b, { type: 'standup:end' });
+  await wait(80);
+  assert.equal(last(c, 'standup').standup, null);
+  [a, b, c, d].forEach(w => w.close());
+});
+
+test('next stand-up time respects the team time zone and days', async () => {
+  const { nextStandup } = await import('../server/room.js');
+  const cfg = { enabled: true, time: '09:30', days: [1, 2, 3, 4, 5], tz: 'Europe/London' };
+  // Friday 16 Oct 2026 13:00 UTC → Monday 19 Oct 09:30 BST (08:30 UTC)
+  assert.equal(new Date(nextStandup(cfg, Date.UTC(2026, 9, 16, 13))).toISOString(), '2026-10-19T08:30:00.000Z');
+  // after the clocks change: Monday 26 Oct 09:30 GMT (09:30 UTC)
+  assert.equal(new Date(nextStandup(cfg, Date.UTC(2026, 9, 23, 13))).toISOString(), '2026-10-26T09:30:00.000Z');
+  assert.equal(nextStandup({ ...cfg, enabled: false }), null);
+});

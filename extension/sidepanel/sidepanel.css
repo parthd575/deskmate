@@ -76,7 +76,7 @@ main { display: flex; flex-direction: column; min-height: 100vh; }
 /* ---- my status ---- */
 .me-bar { padding: 12px 12px 4px; }
 .seg {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 4px;
   background: var(--surface-2); border-radius: 14px;
 }
 .seg button {
@@ -195,3 +195,31 @@ main { display: flex; flex-direction: column; min-height: 100vh; }
 .acts-row { display: flex; gap: 6px; flex: none; }
 .btn.end { background: var(--danger); border-color: transparent; color: #fff; }
 .btn.end:hover { filter: brightness(1.07); background: var(--danger); }
+
+/* ---- stand-up ---- */
+.standup-bar {
+  margin: 10px 10px 0; padding: 10px 12px; border-radius: 14px;
+  background: color-mix(in srgb, #7C8CF8 14%, var(--surface)); border: 1px solid color-mix(in srgb, #7C8CF8 35%, var(--line));
+  display: grid; gap: 8px;
+}
+.standup-bar .row { display: flex; align-items: center; gap: 8px; }
+.standup-bar .row b { font-size: 13px; }
+.standup-bar .timer { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }
+.standup-bar .line { display: flex; flex-wrap: wrap; gap: 4px; }
+.standup-bar .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
+.standup-bar .chip.now { background: #FFD166; color: #3b2f00; border-color: transparent; font-weight: 700; }
+.standup-bar .chip.done { opacity: .5; text-decoration: line-through; }
+.standup-bar .btns { display: flex; gap: 6px; }
+.standup-bar .btns .btn { flex: 1; padding: 6px 8px; }
+.stage { background: radial-gradient(120% 85% at 50% 0%, color-mix(in srgb, var(--sky, var(--accent)) var(--sky-mix, 10%), var(--surface)) 0%, var(--surface) 70%); transition: background 2s; }
+
+/* ---- pets / plant / settings ---- */
+.pet-label { margin-top: 8px; }
+.pet-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.pet-row button { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 4px 7px; font-size: 16px; line-height: 1; }
+.pet-row button[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.days { display: flex; gap: 4px; margin: 2px 0 6px; }
+.days label { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); }
+.days input { margin: 0; }
+#standupBox summary, #advanced summary { cursor: pointer; }
+.plant-line { font-size: 12px; color: var(--muted); margin: -4px 0 8px; }

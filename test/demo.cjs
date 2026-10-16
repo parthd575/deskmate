@@ -14,20 +14,21 @@ fs.mkdirSync(OUT, { recursive: true });
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
 const BOTS = [
-  { name: 'Priya', color: '#EC4899', avatar: { model: 'knight' }, status: { state: 'desk' } },
-  { name: 'Tom', color: '#2F6FD6', avatar: { model: 'mage' }, status: { state: 'lunch', until: Date.now() + 25 * 60000 } },
-  { name: 'Aisha', color: '#A78BFA', avatar: { model: 'barbarian' }, status: { state: 'dnd', message: 'Q4 report' } },
-  { name: 'Leo', color: '#F59E0B', avatar: { model: 'rogue' }, status: { state: 'brb' } },
-  { name: 'Mei', color: '#14B8A6', avatar: { model: 'hooded' }, status: { state: 'desk' } },
+  { name: 'Priya Shah', color: '#EC4899', avatar: { model: 'knight', pet: 'cat' }, plant: 12, status: { state: 'desk' } },
+  { name: 'Tom Becker', color: '#2F6FD6', avatar: { model: 'mage', pet: 'dog' }, plant: 4, status: { state: 'lunch', until: Date.now() + 25 * 60000 } },
+  { name: 'Aisha Khan', color: '#A78BFA', avatar: { model: 'barbarian', pet: 'fox' }, plant: 27, status: { state: 'dnd', message: 'Q4 report' } },
+  { name: 'Leo Martins', color: '#F59E0B', avatar: { model: 'rogue', pet: 'bunny' }, plant: 1, status: { state: 'brb' } },
+  { name: 'Mei Lin', color: '#14B8A6', avatar: { model: 'hooded', pet: 'chick' }, plant: 45, status: { state: 'desk' } },
 ]
 
 function bot(b, i) {
   return new Promise((resolve) => {
-    const ws = new WebSocket(SERVER);
+    const ws = new WebSocket(`${SERVER}/?team=${TEAM}`);
     ws.on('open', () => {
       ws.send(JSON.stringify({
         type: 'hello', team: TEAM, role: 'main',
-        user: { id: `bot${i}@example.com`, name: b.name, email: `bot${i}@example.com`, color: b.color, avatar: b.avatar, tz: ['Asia/Kolkata', 'Europe/London', 'America/New_York'][i % 3] },
+        user: { id: `bot${i}@example.com`, name: b.name, email: `bot${i}@example.com`, color: b.color, avatar: b.avatar, tz: ['Asia/Kolkata', 'Europe/London', 'America/New_York'][i % 3], plant: b.plant },
+        weather: { code: [0, 61, 3, 2, 71][i], isDay: true, temp: [31, 12, 8, 15, -2][i], place: ['Mumbai', 'London', 'New York', 'Lisbon', 'Oslo'][i] },
         status: { ...b.status, source: 'manual' },
       }));
       setInterval(() => ws.send(JSON.stringify({ type: 'ping' })), 20000);
@@ -61,6 +62,7 @@ function bot(b, i) {
   await page.fill('input[name=team]', TEAM);
   await page.evaluate(() => { document.querySelector('#advanced').open = true; });
   await page.fill('input[name=server]', SERVER);
+  await page.click('#petRow button[data-id="dog"]').catch(() => {});
   await page.click('#saveBtn');
   await page.waitForSelector('#desk:not([hidden])');
   await wait(16000); // models load, everyone walks to their seat, Leo walks to the corner and the BRB box drops
@@ -86,6 +88,13 @@ function bot(b, i) {
   await web.waitForSelector('iframe[title=Deskmate]', { timeout: 20000 }).catch(() => console.log('no help bubble'));
   await wait(3000);
   await web.screenshot({ path: `${OUT}/12-help-bubble.png` });
+
+  // stand-up: Tom's at lunch and Leo is BRB, so they're skipped
+  await page.bringToFront();
+  await page.emulateMedia({ colorScheme: 'light' });
+  bots[0].send(JSON.stringify({ type: 'standup:start' }));
+  await wait(9000);
+  await page.screenshot({ path: `${OUT}/13-standup.png` });
 
   await ctx.close();
   bots.forEach(b => b.close());

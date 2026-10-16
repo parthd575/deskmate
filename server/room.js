@@ -18,7 +18,49 @@ export const DEFAULTS = {
   ICE_SERVERS: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
 };
 
-const STATES = new Set(['desk', 'lunch', 'afk', 'dnd', 'meeting', 'brb']);
+const STATES = new Set(['desk', 'lunch', 'afk', 'dnd', 'meeting', 'brb', 'leave']);
+// who joins a scheduled stand-up: people at their desk or focusing (not away, at lunch, BRB,
+// on leave, in another meeting, or offline)
+const STANDUP_STATES = new Set(['desk', 'dnd']);
+const PETS = new Set(['', 'none', 'cat', 'dog', 'bunny', 'chick', 'fox']);
+const KUDOS_GAP_MS = 10 * 60 * 1000;   // one kudos per person per teammate every 10 minutes
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// ---- stand-up schedule: "09:30 on Mon–Fri in Europe/London" → the next time that happens
+function zoned(t, tz) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short',
+  }).formatToParts(new Date(t)).map(p => [p.type, p.value]));
+  return { y: +parts.year, m: +parts.month, d: +parts.day, h: +parts.hour % 24, min: +parts.minute, s: +parts.second, wd: WEEKDAYS.indexOf(parts.weekday) };
+}
+function zonedToUtc(y, m, d, h, min, tz) {
+  let t = Date.UTC(y, m - 1, d, h, min);
+  for (let i = 0; i < 2; i++) {          // correct for the zone's offset (twice, for DST edges)
+    const z = zoned(t, tz);
+    t -= Date.UTC(z.y, z.m - 1, z.d, z.h, z.min) - Date.UTC(y, m - 1, d, h, min);
+  }
+  return t;
+}
+export function nextStandup(cfg, from = Date.now()) {
+  if (!cfg?.enabled) return null;
+  const [h, min] = cfg.time.split(':').map(Number);
+  for (let k = 0; k <= 7; k++) {
+    const z = zoned(from + k * 86400000, cfg.tz);
+    if (!cfg.days.includes(z.wd)) continue;
+    const at = zonedToUtc(z.y, z.m, z.d, h, min, cfg.tz);
+    if (at > from + 1000) return at;
+  }
+  return null;
+}
+function cleanStandup(c) {
+  if (!c || typeof c !== 'object') return null;
+  const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(c.time) ? c.time : '09:30';
+  const days = Array.isArray(c.days) ? [...new Set(c.days.map(Number).filter(d => d >= 0 && d <= 6))] : [1, 2, 3, 4, 5];
+  let tz = clean(c.tz, 48) || 'UTC';
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); } catch { tz = 'UTC'; }
+  const perPerson = Math.min(300, Math.max(20, Number(c.perPerson) || 60));
+  return { enabled: !!c.enabled, time, days, tz, perPerson };
+}
 const MEET_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
 const CLAIM_LINGER_MS = 60 * 1000;
 const MEET_TTL_MS = 3 * 60 * 60 * 1000;
@@ -57,6 +99,10 @@ export class Room {
     this.helps = new Map();   // helpId -> help
     this.calls = new Map();   // callId -> Set<socketId>   (built-in audio calls)
     this.timers = {};         // key -> { at, kind, a }
+    this.stats = {};          // userId -> { points, helped, kudos }  (the desk plant; kept when people leave)
+    this.team = { standup: null };   // team-wide settings
+    this.standup = null;      // the stand-up happening right now
+    this.kudosAt = {};        // "from>to" -> last time (in memory only)
     if (saved) this.#restore(saved);
   }
 
@@ -67,6 +113,9 @@ export class Room {
       helps: [...this.helps.values()],
       calls: [...this.calls.entries()].map(([id, set]) => [id, [...set]]),
       timers: this.timers,
+      stats: this.stats,
+      team: this.team,
+      standup: this.standup,
     });
   }
 
@@ -76,6 +125,9 @@ export class Room {
     for (const h of s.helps || []) this.helps.set(h.id, h);
     for (const [id, sids] of s.calls || []) this.calls.set(id, new Set(sids));
     this.timers = s.timers || {};
+    this.stats = s.stats || {};
+    this.team = s.team || { standup: null };
+    this.standup = s.standup || null;
     // Sockets can be gone after a restart (e.g. a deploy): drop them, and give anyone left
     // without a connection the usual grace period to reconnect.
     for (const m of this.members.values()) {
@@ -88,7 +140,10 @@ export class Room {
     }
   }
 
-  isEmpty() { return this.members.size === 0 && this.calls.size === 0; }
+  // nothing worth keeping: team settings and plants keep a room alive
+  isEmpty() {
+    return this.members.size === 0 && this.calls.size === 0 && !this.team.standup && Object.keys(this.stats).length === 0;
+  }
 
   // ------------------------------------------------------------ timers
   #timer(key, ms, kind, a = null) { this.timers[key] = { at: now() + ms, kind, a }; }
@@ -117,6 +172,11 @@ export class Room {
       this.#timer(`gc:${m.id}`, SEAT_GC_MS, 'gc', m.id);
       return;
     }
+    if (kind === 'standup') {
+      this.#scheduleStandup();
+      return this.#startStandup('schedule');
+    }
+    if (kind === 'standupTurn') return this.#nextTurn(a);
     if (kind === 'gc') {
       const m = this.members.get(a);
       if (m && !m.online && m.sockets.size === 0) this.members.delete(a);
@@ -132,6 +192,10 @@ export class Room {
       id: m.id, name: m.name, email: m.email, color: m.color, avatar: m.avatar, tz: m.tz,
       state: m.state, message: m.message, until: m.until, since: m.since,
       online: m.online, inCall: m.inCall || null, source: m.source, seat: m.seat,
+      weather: m.weather || null,
+      plant: this.stats[m.id]?.points || 0,
+      helped: this.stats[m.id]?.helped || 0,
+      kudos: this.stats[m.id]?.kudos || 0,
       companion: roles.includes('companion'),
       ext: roles.includes('main'),
     };
@@ -213,6 +277,59 @@ export class Room {
     if (h.meetUrl) this.#announceCalls();
   }
 
+  // ------------------------------------------------------------ plants
+  #grow(userId, field, reason, from) {
+    const st = this.stats[userId] ||= { points: 0, helped: 0, kudos: 0 };
+    st[field]++;
+    st.points++;
+    const m = this.members.get(userId);
+    if (m) this.#broadcast({ type: 'presence', member: this.#public(m) });
+    this.#broadcast({ type: 'grow', userId, points: st.points, reason, from: from || null }, { roles: ['main', 'companion'] });
+  }
+
+  // ------------------------------------------------------------ stand-up
+  #scheduleStandup() {
+    this.#clear('standup');
+    const at = nextStandup(this.team.standup);
+    if (at) this.timers.standup = { at, kind: 'standup', a: null };
+  }
+  #eligible(m) { return m && m.online && STANDUP_STATES.has(m.state); }
+  #startStandup(reason) {
+    if (this.standup) return;
+    const order = [...this.members.values()].filter(m => this.#eligible(m))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(m => m.id);
+    if (!order.length) return;
+    const perPerson = this.team.standup?.perPerson || 60;
+    this.standup = { id: newId(), startedAt: now(), reason, order, turn: 0, turnEndsAt: now() + perPerson * 1000, perPerson };
+    this.#timer('standupTurn', perPerson * 1000, 'standupTurn', this.standup.id);
+    this.#broadcast({ type: 'standup', standup: this.standup, started: true }, { roles: ['main', 'companion'] });
+  }
+  #nextTurn(id) {
+    const su = this.standup;
+    if (!su || (id && su.id !== id)) return;
+    // skip anyone who has since gone to lunch, on leave, offline…
+    let turn = su.turn + 1;
+    while (turn < su.order.length && !this.#eligible(this.members.get(su.order[turn]))) turn++;
+    if (turn >= su.order.length) return this.#endStandup('done');
+    su.turn = turn;
+    su.turnEndsAt = now() + su.perPerson * 1000;
+    this.#timer('standupTurn', su.perPerson * 1000, 'standupTurn', su.id);
+    this.#broadcast({ type: 'standup', standup: su }, { roles: ['main', 'companion'] });
+  }
+  #endStandup(reason) {
+    if (!this.standup) return;
+    this.standup = null;
+    this.#clear('standupTurn');
+    this.#broadcast({ type: 'standup', standup: null, reason }, { roles: ['main', 'companion'] });
+  }
+  // people who arrive (or come back to their desk) during the stand-up join the end of the line
+  #joinStandup(m) {
+    const su = this.standup;
+    if (!su || !this.#eligible(m) || su.order.includes(m.id)) return;
+    su.order.push(m.id);
+    this.#broadcast({ type: 'standup', standup: su }, { roles: ['main', 'companion'] });
+  }
+
   // ------------------------------------------------------------ messages
   onMessage(conn, msg) {
     const meta = conn.meta;
@@ -242,9 +359,15 @@ export class Room {
         color: clean(u.color, 9) || '#6C8CFF',
         avatar: u.avatar && typeof u.avatar === 'object' ? {
           skin: clean(u.avatar.skin, 9), hair: clean(u.avatar.hair, 9), style: clean(u.avatar.style, 12), glasses: clean(u.avatar.glasses, 12), model: clean(u.avatar.model, 32),
+          pet: PETS.has(clean(u.avatar.pet, 12)) ? clean(u.avatar.pet, 12) : '',
         } : m.avatar,
         tz: clean(u.tz, 48),
       });
+      // the plant survives server restarts: the client remembers how big it was
+      const hint = Math.min(500, Math.max(0, Math.floor(Number(u.plant) || 0)));
+      const st = this.stats[userId] ||= { points: 0, helped: 0, kudos: 0 };
+      if (hint > st.points) st.points = hint;
+      if (msg.weather) m.weather = this.#weather(msg.weather);
       this.#clear(`offline:${userId}`);
       this.#clear(`gc:${userId}`);
       m.sockets.add(meta.socketId);
@@ -267,8 +390,13 @@ export class Room {
         helps: [...this.helps.values()],
         calls: this.#snapshotCalls(),
         iceServers: this.cfg.ICE_SERVERS,
+        teamCfg: this.team,
+        standup: this.standup,
       });
-      if (meta.role !== 'call') this.#broadcast({ type: 'presence', member: this.#public(m) }, { exceptSocket: meta.socketId });
+      if (meta.role !== 'call') {
+        this.#broadcast({ type: 'presence', member: this.#public(m) }, { exceptSocket: meta.socketId });
+        this.#joinStandup(m);
+      }
       return;
     }
 
@@ -296,7 +424,9 @@ export class Room {
         me.until = Number(msg.until) || null;
         me.source = source;
         if (changed) me.since = now();
-        return this.#broadcast({ type: 'presence', member: this.#public(me) });
+        this.#broadcast({ type: 'presence', member: this.#public(me) });
+        this.#joinStandup(me);
+        return;
       }
 
       case 'help': {
@@ -323,6 +453,7 @@ export class Room {
         // keep the request around briefly so late viewers see "X is on it", then close
         this.#timer(`help:${h.id}`, CLAIM_LINGER_MS, 'help', { id: h.id, reason: 'claimed' });
         this.#broadcast({ type: 'help:claimed', id: h.id, by: me.id, byName: me.name, bySocket: meta.socketId, callId: h.id }, { roles: ['main', 'companion'] });
+        this.#grow(me.id, 'helped', 'help', h.from);   // helping someone grows your plant
         return;
       }
 
@@ -405,10 +536,49 @@ export class Room {
       case 'call:leave':
         return this.#leaveCall(conn);
 
+      case 'kudos': {
+        const to = clean(msg.to, 64);
+        const target = this.members.get(to);
+        if (!target || to === me.id) return;
+        const key = `${me.id}>${to}`;
+        if (now() - (this.kudosAt[key] || 0) < KUDOS_GAP_MS) return this.#send(conn, { type: 'kudos:wait', to });
+        this.kudosAt[key] = now();
+        this.#broadcast({ type: 'kudos', from: me.id, fromName: me.name, to, toName: target.name }, { roles: ['main', 'companion'] });
+        this.#grow(to, 'kudos', 'kudos', me.id);
+        return;
+      }
+
+      case 'weather':
+        me.weather = this.#weather(msg.weather);
+        return this.#broadcast({ type: 'presence', member: this.#public(me) });
+
+      case 'standup:config': {
+        this.team.standup = cleanStandup(msg.standup);
+        this.#scheduleStandup();
+        return this.#broadcast({ type: 'team', teamCfg: this.team, by: me.name }, { roles: ['main', 'companion'] });
+      }
+      case 'standup:start':
+        return this.#startStandup('manual');
+      case 'standup:next':
+        return this.#nextTurn(this.standup?.id);
+      case 'standup:end':
+        return this.#endStandup('ended');
+
       case 'react':
         // emoji reaction floating above my avatar on everyone's desk
         return this.#broadcast({ type: 'react', from: me.id, emoji: clean(msg.emoji, 8) }, { roles: ['main', 'companion'] });
     }
+  }
+
+  #weather(w) {
+    if (!w || typeof w !== 'object') return null;
+    return {
+      code: Math.max(0, Math.min(99, Math.floor(Number(w.code) || 0))),
+      isDay: !!w.isDay,
+      temp: Number.isFinite(Number(w.temp)) ? Math.round(Number(w.temp)) : null,
+      place: clean(w.place, 40),
+      at: now(),
+    };
   }
 
   // The host has already removed conn from `sockets`.

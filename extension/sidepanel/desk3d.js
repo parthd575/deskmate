@@ -3,6 +3,10 @@
 import { THREE, createAvatar, emojiSprite, shade, addSoftLights, configureRenderer } from '../lib/avatar.js';
 import { ease, Spring } from '../lib/toon.js';
 import { makeCharacter } from '../lib/characters.js';
+import { FocusAura } from '../lib/aura.js';
+import { Pet } from '../lib/pets.js';
+import { buildPlant, plantStage } from '../lib/plant.js';
+import { Sky } from '../lib/sky.js';
 
 // soft, film-like materials for the furniture (matches the characters)
 const toonMat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0, ...o });
@@ -38,7 +42,10 @@ function dndTexture(name) {
   return t;
 }
 
-const lookKey = (m) => JSON.stringify([m.color, m.avatar || {}]);
+// the pet is handled separately, so changing it doesn't rebuild the character
+const lookKey = (m) => { const { pet, ...a } = m.avatar || {}; return JSON.stringify([m.color, a]); };
+const DESK_TOP = 0.785;
+const STANDUP_STATES = new Set(['desk', 'dnd']);
 
 export class DeskScene {
   constructor(container, { onSelect, dark = false } = {}) {
@@ -63,6 +70,8 @@ export class DeskScene {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
 
+    this.scene.add(this.camera);             // the sky hangs off the camera
+    this.sky = new Sky(this.camera, container);
     const lights = addSoftLights(this.scene);
     this.hemi = lights.hemi;
     this.sun = lights.key;
@@ -78,6 +87,7 @@ export class DeskScene {
     const floor = this.floor = new THREE.Mesh(new THREE.CircleGeometry(10, 64), this.floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
+    floor.renderOrder = -20;   // drawn before the sky, so the sky shows over the far floor
     this.scene.add(floor);
 
     this.furniture = new THREE.Group();
@@ -120,6 +130,8 @@ export class DeskScene {
     this.hemi.intensity = dark ? 0.8 : 1.15;
     this.sun.intensity = dark ? 1.8 : 2.3;
     this.lights.rim.intensity = dark ? 1.8 : 1.4;
+    this.base = { hemi: this.hemi.intensity, sun: this.sun.intensity };   // the sky scales these
+    this.sky?.setTheme(dark);
   }
 
   // ---------- layout ----------
@@ -161,6 +173,8 @@ export class DeskScene {
     this.cafe.group.position.set(maxX * 0.55 + 0.7, 0, backZ - 1.9);
     // the BRB corner: back-left, opposite the café
     this.brbCorner = { x: -(maxX * 0.55 + 0.9), z: backZ - 1.6 };
+    this.benchEdge = maxX + 1.0;   // walking round the end of the bench
+    this.frontZ = 1.0;             // just in front of the desks
     this.cafe.group.rotation.y = 0;
     this.#frameCamera();
     // reassign people to seats
@@ -186,6 +200,11 @@ export class DeskScene {
     const bc = this.brbCorner;
     for (const [dx, dz] of [[-0.9, -0.5], [0.9, -0.5], [-0.9, 0.9], [0.9, 0.9]]) add(bc.x + dx, 0, bc.z + dz);
     add(bc.x, 1.8, bc.z);
+    if (this.standup) {                         // make room for the stand-up circle in front
+      const c = this.#circle();
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, 1], [0, -1]]) add(c.x + dx * (c.r + 0.5), 0, c.z + dz * (c.r + 0.5));
+      add(c.x, 2.1, c.z + c.r);
+    }
     const elev = this.elev = this.seatTransform(n - 1, n).row > 0 ? 0.66 : 0.55;
     this.target = new THREE.Vector3((minX + maxX) / 2, 0.7, (minZ + maxZ) / 2);
     const cam = this.camera;
@@ -361,6 +380,20 @@ export class DeskScene {
     const members = snapshot.members || [];
     this.helps = snapshot.helps || [];
     this.meId = snapshot.me?.id;
+    // the sky follows my own weather
+    const w = snapshot.me?.weather || null;
+    if ((w && w.code) !== (this.weather && this.weather.code) || !!w !== !!this.weather) { this.weather = w; this.sky.set(w); }
+    // stand-up: everyone in it walks to a circle in front of the desks
+    const su = snapshot.standup || null;
+    if ((su && su.id) !== (this.standup && this.standup.id)) {
+      this.standup = su;
+      this.#frameCamera();
+    } else this.standup = su;
+    const speakerKey = su ? su.id + ':' + su.turn : '';
+    if (speakerKey !== this.speakerKey) {
+      this.speakerKey = speakerKey;
+      if (su) setTimeout(() => this.wave(su.order[su.turn], 2), 300);   // "hi, my turn"
+    }
     const ids = new Set(members.map(m => m.id));
     for (const [id, p] of this.people) if (!ids.has(id)) this.#remove(p);
     // seats are compacted so the arc stays tidy
@@ -372,6 +405,7 @@ export class DeskScene {
       else if (p.lookKey !== lookKey(m)) this.#swapLook(p, m);   // they picked a new character
       p.member = m;
       p.seatIndex = i;
+      this.#setPet(p, m.avatar?.pet || '');
       this.#applyStatus(p);
     });
     this.#assignCafe();
@@ -460,6 +494,9 @@ export class DeskScene {
     p.label.remove();
     if (p.badge) this.scene.remove(p.badge);
     if (p.box) this.scene.remove(p.box.group);
+    p.aura?.dispose(this.scene);
+    if (p.pet) { this.scene.remove(p.pet.root); p.pet.dispose(); }
+    if (p.mic) this.scene.remove(p.mic);
     this.people.delete(p.id);
   }
 
@@ -478,7 +515,8 @@ export class DeskScene {
     const m = p.member;
     if (m.state === 'lunch') return 'cafe';
     if (m.state === 'brb') return 'brb';     // stepped away, still visible
-    if (m.state === 'afk') return 'away';
+    if (m.state === 'afk' || m.state === 'leave') return 'away';
+    if (this.standup?.order.includes(m.id) && STANDUP_STATES.has(m.state)) return 'standup';
     return 'seat';
   }
 
@@ -501,7 +539,8 @@ export class DeskScene {
 
   #route(p) {
     const mode = this.#mode(p);
-    const key = mode + ':' + (mode === 'cafe' ? p.cafeSlot : mode === 'brb' ? p.brbSlot : p.seatIndex) + ':' + this.laidOut;
+    const suSlot = mode === 'standup' ? this.standup.order.indexOf(p.id) + '/' + this.standup.order.length : '';
+    const key = mode + ':' + (mode === 'cafe' ? p.cafeSlot : mode === 'brb' ? p.brbSlot : mode === 'standup' ? suSlot : p.seatIndex) + ':' + this.laidOut;
     if (p.routeKey === key) return;
     const firstTime = !p.routeKey;
     p.prevMode = p.mode;
@@ -517,6 +556,7 @@ export class DeskScene {
       dest = { x: this.brbCorner.x + (col ? 0.75 : 0) - row * 0.2, z: this.brbCorner.z + row * 0.8, rotY: 0.25 };
     }
     else if (mode === 'away') dest = { x: seat.x - Math.sin(seat.rotY) * 1.3, z: seat.z - Math.cos(seat.rotY) * 1.3, rotY: seat.rotY + Math.PI };
+    else if (mode === 'standup') dest = this.#circleSlot(this.standup.order.indexOf(p.id), this.standup.order.length);
     else dest = seat;
     if (firstTime || p.isNew) {
       p.pos.set(dest.x, 0, dest.z); p.rotY = dest.rotY; p.path = []; p.isNew = false;
@@ -533,6 +573,15 @@ export class DeskScene {
       p.path = mode === 'brb' ? [new THREE.Vector3(via.x, 0, via.z), new THREE.Vector3(dest.x, 0, dest.z)]
         : mode === 'seat' ? [new THREE.Vector3(via.x, 0, via.z), new THREE.Vector3(seat.x, 0, seat.z)]
         : [new THREE.Vector3(dest.x, 0, dest.z)];
+    }
+    // to / from the stand-up circle: out behind the chair, round the end of the bench
+    if (mode === 'standup' || (p.prevMode === 'standup' && p.prevMode !== mode)) {
+      const from = mode === 'standup' ? seat : p.pos;
+      const side = from.x < (this.target?.x || 0) ? -this.benchEdge : this.benchEdge;
+      const around = [new THREE.Vector3(side, 0, back.z), new THREE.Vector3(side, 0, this.frontZ + 0.6)];
+      if (mode === 'standup') p.path = [new THREE.Vector3(back.x, 0, back.z), ...around, new THREE.Vector3(dest.x, 0, dest.z)];
+      else if (mode === 'seat') p.path = [...around.reverse(), new THREE.Vector3(back.x, 0, back.z), new THREE.Vector3(seat.x, 0, seat.z)];
+      else p.path = [...around.reverse(), new THREE.Vector3(dest.x, 0, dest.z)];
     }
     if (p.prevMode === 'seat' && mode === 'away') p.path = [new THREE.Vector3(dest.x, 0, dest.z)];
     if (p.prevMode === 'away' && mode === 'seat') p.path = [new THREE.Vector3(seat.x, 0, seat.z)];
@@ -559,6 +608,7 @@ export class DeskScene {
       seat.lidTarget = m.state === 'afk' ? -1.3 : 0.22;
       seat.chairTarget = this.#mode(p) === 'seat' ? 0 : 0.35;
       seat.seatMat.color.copy(shade(m.color, 0.12));
+      this.#updatePlant(seat, m, this.t);
     }
     p.av.setHeadphones(m.state === 'dnd' || !!m.inCall, !!m.inCall);
     const wantBadge = d.key === 'help' ? '❓' : d.key === 'call' ? '🎙️' : m.state === 'lunch' ? '🍜' : m.state === 'afk' ? '💤' : m.state === 'meeting' ? '📅' : '';
@@ -575,6 +625,74 @@ export class DeskScene {
     p.label.classList.toggle('help', d.key === 'help');
     p.label.classList.toggle('me', m.id === this.meId);
     p.label.dataset.state = d.key;
+  }
+
+  // ---------- stand-up circle ----------
+  #circle() {
+    const n = this.standup?.order.length || 1;
+    const r = Math.max(0.75, n * 0.3);
+    return { x: this.target ? this.target.x : 0, z: this.frontZ + 0.7 + r, r };
+  }
+  #circleSlot(i, n) {
+    const c = this.#circle();
+    // spread around the circle, starting at the back (facing the camera) so faces are visible
+    const a = Math.PI + (i / Math.max(n, 1)) * Math.PI * 2 + (n > 1 ? Math.PI / n : 0);
+    const x = c.x + Math.sin(a) * c.r, z = c.z + Math.cos(a) * c.r;
+    return { x, z, rotY: Math.atan2(c.x - x, c.z - z) };
+  }
+  #standupProps() {
+    if (this.su3d) return this.su3d;
+    const g = new THREE.Group();
+    const rug = new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshStandardMaterial({ color: '#7C8CF8', roughness: 0.9, transparent: true, opacity: 0.35 }));
+    rug.rotation.x = -Math.PI / 2; rug.position.y = 0.006; rug.receiveShadow = true;
+    g.add(rug);
+    const spot = new THREE.Mesh(new THREE.RingGeometry(0.28, 0.38, 40), new THREE.MeshBasicMaterial({ color: '#FFD166', transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+    spot.rotation.x = -Math.PI / 2; spot.position.y = 0.012;
+    this.scene.add(spot);
+    const mic = emojiSprite('🎤', 0.34);
+    this.scene.add(mic);
+    g.visible = false; spot.visible = false; mic.visible = false;
+    this.scene.add(g);
+    return (this.su3d = { g, rug, spot, mic });
+  }
+
+  // ---------- pets & plants ----------
+  #setPet(p, kind) {
+    if (kind === 'none') kind = '';
+    if (p.petKind === kind) return;
+    if (p.pet) { this.scene.remove(p.pet.root); p.pet.dispose(); p.pet = null; }
+    p.petKind = kind;
+    if (!kind) return;
+    p.pet = new Pet(kind);
+    p.pet.root.scale.setScalar(1.5);
+    p.petPos = null;   // placed on the first frame
+    this.scene.add(p.pet.root);
+    p.pet.hop(1.2);
+  }
+
+  #updatePlant(seat, m, t) {
+    const stage = plantStage(m.plant || 0);
+    if (seat.plantStage === stage && seat.plantOwner === m.id) return;
+    const grew = seat.plantOwner === m.id && stage > seat.plantStage;
+    if (seat.plant) { seat.group.remove(seat.plant); seat.plant.traverse(o => o.geometry?.dispose()); }
+    seat.plant = buildPlant(stage);
+    seat.plant.position.set(-0.42, DESK_TOP, 0.5);
+    seat.plantScale = 1.7;
+    seat.plant.rotation.y = 0.6;
+    seat.group.add(seat.plant);
+    seat.plantStage = stage;
+    seat.plantOwner = m.id;
+    seat.plantBorn = grew ? t : -10;
+  }
+
+  // a teammate's plant grew (they helped someone / got kudos): sparkle + a little pop
+  grow(id, reason) {
+    const p = this.people.get(id);
+    if (!p) return;
+    const seat = this.seats[p.seatIndex];
+    if (seat) seat.plantBorn = this.t;
+    this.react(id, reason === 'kudos' ? '👏' : '🌱');
+    p.pet?.hop(1);
   }
 
   react(id, emoji) {
@@ -602,6 +720,14 @@ export class DeskScene {
     this.t += realDt;
     const t = this.t;
 
+    // sky + lighting for my local time of day and weather
+    const L = this.sky.update(t, dt);
+    if (this.base) {
+      this.sun.intensity = this.base.sun * L.sun + L.flash * 3;
+      this.sun.color.set(L.sunColor);
+      this.hemi.intensity = this.base.hemi * L.hemi + L.flash * 1.5;
+    }
+
     // camera: gentle drift + user yaw
     const yaw = this.yaw + Math.sin(t * 0.1) * 0.03;
     const dist = this.camDist * this.zoom;
@@ -623,6 +749,10 @@ export class DeskScene {
         const k = s.dndTarget ? ease.outBack(Math.min(1, (t - (s.dndBorn ?? t)) / 0.45), 2.2) : s.dndShow;
         s.dnd.visible = s.dndShow > 0.01;
         s.dnd.scale.setScalar(Math.max(0.001, k));
+      }
+      if (s.plant) {
+        const k = Math.min(1, (t - (s.plantBorn ?? -10)) / 0.7);
+        s.plant.scale.setScalar((s.plantScale || 1) * (k < 1 ? Math.max(0.05, ease.outBack(k, 2.6)) : 1 + Math.sin(t * 1.3 + s.x) * 0.015));
       }
       if (s.lidTarget !== undefined) s.lid.rotation.x += (s.lidTarget - s.lid.rotation.x) * Math.min(1, dt * 4);
       if (s.chairTarget !== undefined) {
@@ -670,14 +800,25 @@ export class DeskScene {
         if (p.destRot !== undefined) p.rotY = lerpAngle(p.rotY, p.destRot, dt * 6);
         p.arrived = true;
         const d = display(m, this.helps);
-        av.pose = mode === 'away' || mode === 'brb' ? 'stand' : 'sit';
+        av.pose = mode === 'away' || mode === 'brb' || mode === 'standup' ? 'stand' : 'sit';
+        const speaking = mode === 'standup' && this.standup.order[this.standup.turn] === m.id;
         if (p.waveUntil && t < p.waveUntil) av.activity = 'wave';
+        else if (mode === 'standup') av.activity = speaking ? 'talk' : 'idle';
         else if (d.key === 'help') av.activity = 'raise';
         else if (mode === 'cafe') av.activity = 'eat';
         else if (mode === 'brb') av.activity = 'idle';
         else if (m.inCall) av.activity = 'talk';
         else if (m.state === 'meeting') av.activity = 'listen';
         else av.activity = 'type';
+      }
+
+      // Focus mode: power-up aura once they're settled at the desk (bursts on as they switch Focus on)
+      const focusing = m.state === 'dnd' && mode === 'seat' && !p.path.length;
+      if (focusing && !p.aura) { p.aura = new FocusAura({ size: 1.3 }); this.scene.add(p.aura.group); }
+      if (p.aura) {
+        if (focusing && !p.aura.target) p.av.hop?.(0.6);
+        p.aura.set(focusing, t);
+        p.aura.update(t, dt, p.pos, { seated: true, faceCamera: this.camera });
       }
 
       // away people fade out once they've "left"; returning people fade back in
@@ -694,6 +835,39 @@ export class DeskScene {
       }
       av.root.rotation.y = p.rotY;
       av.update(t, dt);
+
+      // pet: on the desk while its owner works, trotting after them otherwise
+      if (p.pet) {
+        const seat = this.seats[p.seatIndex];
+        const onDesk = mode === 'seat' && !p.path.length && seat;
+        let goal, goalRot;
+        if (onDesk) {
+          goal = seat.group.localToWorld(tmp.set(0.4, DESK_TOP, 0.58)).clone();
+          goalRot = seat.rotY - 0.35;
+        } else {
+          const side = hidden ? 0.62 : 0.42;
+          goal = new THREE.Vector3(p.pos.x + Math.cos(p.rotY) * side, 0, p.pos.z - Math.sin(p.rotY) * side - 0.1);
+          goalRot = p.rotY;
+        }
+        if (!p.petPos) { p.petPos = goal.clone(); p.petRot = goalRot; }
+        if (onDesk !== p.petOnDesk) { p.petOnDesk = onDesk; p.pet.hop(1.4); }
+        const d = goal.clone().sub(p.petPos);
+        const dist = d.length();
+        const moving = dist > 0.04;
+        if (moving) {
+          p.petPos.addScaledVector(d.normalize(), Math.min(dist, 2.8 * realDt));
+          const flat = Math.hypot(d.x, d.z);
+          if (flat > 0.01) p.petRot = lerpAngle(p.petRot, Math.atan2(d.x, d.z), dt * 10);
+        } else p.petRot = lerpAngle(p.petRot, goalRot, dt * 4);
+        p.pet.root.position.copy(p.petPos);
+        p.pet.root.rotation.y = p.petRot;
+        p.pet.root.visible = mode !== 'away' || av.opacity > 0.3;
+        p.pet.update(t, dt, {
+          moving: moving && dist > 0.15,
+          sleeping: onDesk && m.state === 'dnd',
+          excited: this.helps.some(h => !h.claimedBy && h.from !== m.id),
+        });
+      }
 
       // floating badge
       const headY = hidden ? 1.6 : av.pose === 'sit' ? 1.78 : 1.95;
@@ -724,6 +898,27 @@ export class DeskScene {
       const x = (anchor.x * 0.5 + 0.5) * this.width;
       const y = (-anchor.y * 0.5 + 0.5) * this.height;
       p.lx = x; p.ly = y; p.lz = anchor.z;
+    }
+
+    // stand-up: rug in the middle, a spotlight + mic over whoever's talking
+    if (this.standup || this.su3d) {
+      const P = this.#standupProps();
+      const on = !!this.standup;
+      P.g.visible = on;
+      const speaker = on && this.people.get(this.standup.order[this.standup.turn]);
+      const there = speaker && !speaker.path.length && speaker.mode === 'standup';
+      P.spot.visible = P.mic.visible = !!there;
+      if (on) {
+        const c = this.#circle();
+        P.g.position.set(c.x, 0, c.z);
+        P.rug.scale.setScalar(c.r + 0.35);
+      }
+      if (there) {
+        const pp = speaker.av.root.position;
+        P.spot.position.set(pp.x, 0.012, pp.z);
+        P.spot.material.opacity = 0.65 + Math.sin(t * 4) * 0.25;
+        P.mic.position.set(pp.x + 0.3, 2.1 + Math.sin(t * 3) * 0.04, pp.z);
+      }
     }
 
     this.#placeLabels();

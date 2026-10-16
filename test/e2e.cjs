@@ -92,6 +92,8 @@ async function setup(u, color, lite = false) {
   await web.waitForSelector('iframe[title=Deskmate]', { timeout: 8000 })
     .then(() => check(true, 'Help bubble appeared on Bob’s open web page'), () => check(false, 'Help bubble appeared on Bob’s open web page'));
   await wait(1500);
+  const sound = await bob.sw.evaluate(async () => (await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })).map(c => c.documentUrl));
+  check(sound.some(u => u.endsWith('/offscreen/offscreen.html')), `Help sound played on Bob’s computer (${sound.join(', ') || 'no sound page'})`);
   await web.screenshot({ path: `${OUT}/03-help-bubble.png` });
   await bob.page.screenshot({ path: `${OUT}/04-desk-help-request.png` });
 

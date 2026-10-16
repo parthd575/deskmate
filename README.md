@@ -54,18 +54,23 @@ node test/demo.cjs --live   # keeps 5 bots online in a team; set TEAM=<your code
 
 **Presence that runs itself**
 
-- **One-click status bar:** 💻 Here · 🍜 Lunch · ☕ BRB · 🎧 Focus. Click the active one again to go back to "Here".
+- **One-click status bar:** 💻 Here · 🍜 Lunch · ☕ BRB · 🎧 Focus · 🌴 Leave. Click the active one again to go back to "Here".
 - **Auto-away:** after *N* minutes idle, or the moment your screen locks, you show as 💤 Away. You come back automatically when you're active again.
 - **Lunch timer:** "back in 32m" shows for everyone. Use **+15m** if lunch runs long. When you come back to your computer you're marked back at your desk without clicking anything (you can turn this off).
-- **Google Chat sync** (optional): your Google Chat *Active / Away / Do not disturb* state and custom status flow into Deskmate. See [Google Chat setup](#google-chat-status-sync).
+- **Google Chat sync:** with Google Chat or Gmail open in a tab, your Chat status (*In a meeting*, *Do not disturb*, *Away*, custom status) flows into Deskmate. No Google API or setup needed; see [Google Chat status sync](#google-chat-status-sync).
 - **Manual beats automatic:** auto-away never overrides a lunch or Focus status you set yourself.
 
 **The 3D desk**
 
+- **Desk pets:** pick a cat, dog, bunny, chick or fox in Settings. It sits on your desk, trots after you to lunch or the BRB corner, perks up when someone needs help, and curls up asleep while you're in Focus.
+- **A plant that grows:** every time you help someone, or a teammate sends you **👏 kudos** (from your card on the desk), your desk plant grows: sprout → seedling → leafy → bud → flowers → full bloom → a little tree. Kudos are limited to one per teammate every 10 minutes.
+- **Weather and time of day:** the sky over the desk follows *your* clock (dawn, day, dusk, a starry night) and your local weather (sun, clouds, rain, snow, fog, storms with lightning), and the lighting changes with it. Everyone's card and team row shows their weather. The city comes from your time zone, or set one under **Settings → Advanced → Weather for the sky** (Open-Meteo, free, no key).
+- **Team stand-up:** set a time and days under **Settings → Team stand-up** (it applies to the whole team). At that time everyone who's here or focusing walks to a circle in front of the desks, a gong plays, and a spotlight + 🎤 passes from person to person with a countdown (**Next** / **End stand-up**). People who are away, at lunch, BRB, **on leave** or in another meeting are skipped; anyone who arrives late joins the end of the line. You can also start one any time.
+
 - **Six rigged 3D characters:** Robo, Knight, Mage, Barbarian, Rogue and Hooded Rogue. Pick one during setup (or later in Settings) and everyone's desk updates straight away. The models are rigged and animated glTF files in `extension/models/` (KayKit Adventurers and three.js RobotExpressive, both CC0 — see `extension/models/CREDITS.md`).
 - **Real animation clips plus a pose layer:** idle, walk, sit, cheer and wave come from the models; Deskmate adds typing at the laptop, a raised hand and head turns on top. Poses settle with springs, so movement has a little overshoot.
 - Up to 4 people share one bench. Bigger teams get a second, staggered row behind so everyone stays large and visible.
-- Everyone sits at the shared desk and types away. Going to lunch, your character **walks over to the café table**. **BRB** walks you to the corner and a cardboard box drops over you. Going away, your character walks off, your laptop closes and your chair turns. **Focus** pops a *Do Not Disturb* board up on your desk.
+- Everyone sits at the shared desk and types away. Going to lunch, your character **walks over to the café table**. **BRB** walks you to the corner and a cardboard box drops over you. Going away, your character walks off, your laptop closes and your chair turns. **Focus** pops a *Do Not Disturb* board up on your desk and powers you up: a burst of light and a shockwave, then a flickering energy aura with rising sparks for as long as you're focusing.
 - Raised hand plus a bouncing **Needs help** tag when someone asks for help.
 - Emoji reactions (👋 👍 🎉 ☕ 😂) float above your head on everyone's screen.
 - Drag to look around, scroll to zoom, double-click to reset. Light and dark mode follow your system.
@@ -75,6 +80,7 @@ node test/demo.cjs --live   # keeps 5 bots online in a team; set TEAM=<your code
 
 - Type what you need, or nothing, and press **Ask for help** (or `⌥⇧H` from anywhere).
 - Teammates get a round bubble on the right of the screen: your character with its hand raised and "*{you}* needs help", with **Join** / **Not now**. (A system notification is only used if the bubble can't be shown.)
+- A soft three-note chime plays with the bubble (a two-tone ring for direct calls). Turn it off under **Settings → Advanced → Play a sound…**; Focus mode is always silent.
 - The first person to tap **Join** claims it. Everyone else's bubble changes to "Priya is on it ✓", so no one doubles up.
 - The helper's browser opens `meet.google.com/new` with their Google account. As soon as Meet gives the meeting its code, Deskmate shares the link and it **opens automatically for the person who asked**. If no link arrives within 15 seconds (say the helper joined from the Mac app only), the asker's browser creates the Meet instead.
 - Calling someone from their card works the same way: they get a bubble, tap **Join**, and land in your Meet.
@@ -158,17 +164,19 @@ To hand it out without macOS security warnings, sign and notarise it with an App
 
 ## Google Chat status sync
 
-Deskmate reads **your own** Google Chat availability through the Chat API's `users/me/availability` endpoint and maps it like this: **Active → Here**, **Away → Away**, **Do not disturb → Focus**. Your Chat custom status becomes your Deskmate note. Each person's extension reads only their own status. Nobody can read anyone else's.
+No Google API, no OAuth setup and no sign-in prompt. While you have **Google Chat** (chat.google.com) or **Gmail** open in a tab, Deskmate reads the status chip at the top of the page, the one that says *Active*, *Do not disturb* or *In a meeting*, and mirrors it:
 
-Requirements: a Google Workspace **Business or Enterprise** account. One-time setup for an admin:
+| Google Chat shows | Deskmate |
+|---|---|
+| Active | 💻 At desk (only switches back if Chat set your earlier status, or you were auto-away) |
+| *In a meeting / In a call / Presenting* (even while Chat also says Do not disturb) | 📅 In a meeting: you stay at your desk, **Here** stays selected, and you aren't marked Away for being idle |
+| Do not disturb (or a *Focus* status) | 🎧 Focus |
+| Away / Out of office | 💤 Away |
+| a custom status, e.g. *🏡 Working from home* | becomes your note |
 
-1. In Google Cloud Console, create a project and enable **Google Chat API**.
-2. Configure the OAuth consent screen as **Internal**.
-3. Create an OAuth client ID of type **Chrome extension**, using your extension's ID (shown on `chrome://extensions`). To keep the ID stable for unpacked installs, add a `"key"` to the manifest.
-4. Put the client ID in `extension/manifest.json` → `oauth2.client_id`.
-5. Each person ticks **Sync my Google Chat status** in Deskmate settings and approves the one-time Google prompt.
+A Lunch, BRB, Focus or meeting status you set yourself in Deskmate always wins; Chat can't override it. Turn syncing on or off under **Settings → Advanced → Use my Google Chat status**; the line shows what Deskmate currently sees.
 
-The scope used is `chat.users.availability.readonly`. Deskmate never writes to your Chat status. Writing Focus back to Chat (DND) is a small follow-up if you want it (see the roadmap).
+How it works: `extension/content/gchat.js` runs only on chat.google.com and mail.google.com, reads just that one element (`[role=button][aria-label^="Status:"]`), and sends the text to Deskmate. It reads nothing else on the page. Two limits: the tab has to be open (it can sit in the background), and the status words are matched in English (plus a few common French/German/Spanish ones). If Google renames the element, syncing stops quietly until the selector is updated.
 
 ---
 
@@ -229,14 +237,13 @@ The end-to-end test loads the real extension into three Chrome profiles. It chec
 ## Roadmap ideas
 
 1. **Google sign-in verification on the server**: verify a Google ID token on connect so identity can't be spoofed.
-2. **Calendar-aware status**: auto 📅 *In a meeting* from Google Calendar, plus "free in 12 min" hints on the help button.
-3. **Write Focus back to Google Chat** (`MarkAsDoNotDisturb`) so one switch silences both.
-4. **Google Meet API**: create the Meet on the server with a Workspace service account so links are ready before anyone opens a browser.
-5. **Pods/zones**: several tables per team (Design, Dev, Support) with a walk-over to visit another pod.
-6. **Smart routing**: tag skills on people ("AWS", "Figma") and offer help requests to the right person first, then the whole team after 30 s.
-7. **Scheduled statuses**: "Lunch at 1:00 every weekday", working hours and time-zone shading on the desk.
-8. **Missed-help digest**: a gentle summary of requests you missed while in Focus.
-9. **Windows tray build** of the companion (the code is cross-platform. It needs a Windows icon and installer config).
+2. **"Free in 12 min" hints** on the help button for people in a meeting.
+3. **Google Meet API**: create the Meet on the server with a Workspace service account so links are ready before anyone opens a browser.
+4. **Pods/zones**: several tables per team (Design, Dev, Support) with a walk-over to visit another pod.
+5. **Smart routing**: tag skills on people ("AWS", "Figma") and offer help requests to the right person first, then the whole team after 30 s.
+6. **Scheduled statuses**: "Lunch at 1:00 every weekday", working hours and time-zone shading on the desk.
+7. **Missed-help digest**: a gentle summary of requests you missed while in Focus.
+8. **Windows tray build** of the companion (the code is cross-platform. It needs a Windows icon and installer config).
 
 ## Project layout
 

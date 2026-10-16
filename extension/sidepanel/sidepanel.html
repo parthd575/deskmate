@@ -40,6 +40,8 @@
       <div class="card pop" id="personCard" hidden></div>
     </section>
 
+    <section class="standup-bar" id="standupBar" hidden></section>
+
     <section class="me-bar">
       <div class="seg" id="quick" role="radiogroup" aria-label="My status"></div>
       <div class="me-meta" id="meMeta"></div>
@@ -75,11 +77,26 @@
         <div class="avatar-pickers">
           <label>Pick your character</label>
           <div class="char-grid" id="charGrid" role="radiogroup" aria-label="Character"></div>
+          <label class="pet-label">Desk pet</label>
+          <div class="pet-row" id="petRow" role="radiogroup" aria-label="Desk pet"></div>
         </div>
       </div>
       <label>Your name<input name="name" required maxlength="40" autocomplete="name"></label>
       <label>Work email<input name="email" type="email" maxlength="120" autocomplete="email"></label>
       <label>Team code<input name="team" required maxlength="64" placeholder="e.g. design-squad" autocomplete="off"></label>
+      <details id="standupBox" hidden>
+        <summary>Team stand-up</summary>
+        <label class="check"><input type="checkbox" name="suEnabled"> Gather the team for a stand-up</label>
+        <div class="row2">
+          <label>Time<input name="suTime" type="time" value="09:30"></label>
+          <label>Each person gets
+            <select name="suPer"><option value="45">45 sec</option><option value="60">1 min</option><option value="90">1½ min</option><option value="120">2 min</option><option value="180">3 min</option></select>
+          </label>
+        </div>
+        <div class="days" id="suDays" role="group" aria-label="Days"></div>
+        <p class="muted small" id="suNote">Applies to everyone on this team. People who are away, at lunch, BRB, on leave or in another meeting are skipped.</p>
+        <button type="button" class="btn" id="suStartNow">🧍 Start a stand-up now</button>
+      </details>
       <details id="advanced">
         <summary>Advanced</summary>
         <label>Server URL<input name="server" required placeholder="wss://deskmate.your-name.workers.dev"></label>
@@ -87,7 +104,8 @@
           <label>Away after (min)<input name="idleMinutes" type="number" min="1" max="120"></label>
           <label>Lunch length (min)<input name="lunchMinutes" type="number" min="5" max="180"></label>
         </div>
-        <label class="check"><input type="checkbox" name="gchat"><span>Sync my Google Chat status<span class="muted small" id="gchatNote"></span></span></label>
+        <label>Weather for the sky<input name="weatherPlace" maxlength="60" placeholder="City (blank = from your time zone)"></label>
+        <label class="check"><input type="checkbox" name="gchat"><span>Use my Google Chat status (In a meeting, Do not disturb, Away…) <span class="muted small" id="gchatNote"></span></span></label>
         <label>Calls open in
           <select name="callApp">
             <option value="meet">Google Meet</option>
@@ -95,6 +113,7 @@
           </select>
         </label>
         <label class="check"><input type="checkbox" name="bubbles"> Show help pop-ups on the page I'm viewing</label>
+        <label class="check"><input type="checkbox" name="sound"> Play a sound when someone needs help or calls me</label>
         <label class="check"><input type="checkbox" name="autoBack"> Mark me back at desk when I return from lunch</label>
       </details>
       <button class="btn primary big" type="submit" id="saveBtn">Join desk</button>

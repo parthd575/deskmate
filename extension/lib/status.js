@@ -9,9 +9,19 @@ export const STATUS = {
   afk:     { label: 'Away',          short: 'Away',     emoji: '💤', color: '#94A3B8', present: false },
   dnd:     { label: 'Focusing',      short: 'Focus',    emoji: '🎧', color: '#EF4444', present: true },
   meeting: { label: 'In a meeting',  short: 'Meeting',  emoji: '📅', color: '#3B82F6', present: true },
+  leave:   { label: 'On leave',      short: 'Leave',    emoji: '🌴', color: '#14B8A6', present: false },
 };
 
-export const QUICK = ['desk', 'lunch', 'brb', 'dnd'];
+export const QUICK = ['desk', 'lunch', 'brb', 'dnd', 'leave'];
+
+export const PETS = [
+  { id: '', label: 'None', emoji: '🚫' },
+  { id: 'cat', label: 'Cat', emoji: '🐱' },
+  { id: 'dog', label: 'Dog', emoji: '🐶' },
+  { id: 'bunny', label: 'Bunny', emoji: '🐰' },
+  { id: 'chick', label: 'Chick', emoji: '🐥' },
+  { id: 'fox', label: 'Fox', emoji: '🦊' },
+];
 
 export const SKIN = ['#F5D0B5', '#E8B48F', '#C68B62', '#8D5A3B', '#5C3A24'];
 export const HAIR = ['#2B2118', '#5A3825', '#A0522D', '#D9B26F', '#9AA0A6', '#E4572E'];

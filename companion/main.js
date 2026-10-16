@@ -10,6 +10,7 @@ import WebSocket from 'ws';
 import { readMacFocus } from './macfocus.js';
 import { DeskClient, newId } from './app/lib/client.js';
 import { STATUS, DEFAULT_SERVER } from './app/lib/status.js';
+import { fetchWeather } from './app/lib/weather.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.join(__dirname, 'app');
@@ -19,7 +20,7 @@ const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
 const DEFAULTS = {
   server: DEFAULT_SERVER, team: '', name: '', email: '', color: '#6C8CFF',
   avatar: { skin: '#F5D0B5', hair: '#2B2118', style: 'short' },
-  idleMinutes: 5, lunchMinutes: 45, gchat: false, bubbles: true, autoBack: true, callApp: 'meet', launchAtLogin: true,
+  idleMinutes: 5, lunchMinutes: 45, gchat: false, bubbles: true, sound: true, autoBack: true, callApp: 'meet', launchAtLogin: true,
 };
 
 let settings, client, tray, panel, callWin = null;
@@ -89,7 +90,8 @@ function showBubble(data) {
   });
   w.setAlwaysOnTop(true, 'screen-saver');
   w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  w.loadURL(`app://deskmate/bubble/bubble.html#${encodeURIComponent(JSON.stringify(data))}`);
+  const chime = settings.sound !== false && ['help', 'invite', 'standup'].includes(data.kind) ? data.kind : null;
+  w.loadURL(`app://deskmate/bubble/bubble.html#${encodeURIComponent(JSON.stringify({ ...data, chime }))}`);
   w.once('ready-to-show', () => w.showInactive());
   w.on('closed', () => { bubbles.delete(data.id); restackBubbles(); });
   bubbles.set(data.id, w);
@@ -130,7 +132,16 @@ function fullState(snap = client.snapshot()) {
   return { ...snap, settings: pub, configured: client.configured, gchat: { available: false } };
 }
 
+async function refreshWeather() {
+  try {
+    const w = await fetchWeather({ place: settings.weatherPlace, tz: settings.tz || Intl.DateTimeFormat().resolvedOptions().timeZone });
+    if (w) client.setWeather(w);
+  } catch (e) { console.warn('[deskmate] weather', e.message || e); }
+}
+
 function onChange(snap) {
+  // remember how big my plant is, so it survives a server restart
+  if ((snap.me?.plant || 0) > (settings.plant || 0)) { settings.plant = snap.me.plant; client.settings.plant = snap.me.plant; saveSettings(); }
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('state', fullState(snap));
   updateTray(snap);
 }
@@ -167,6 +178,12 @@ function onEvent(e, snap) {
       break;
     case 'call:invite':
       showBubble({ kind: 'invite', id: e.callId, url: e.url, from: e.from, name: e.fromName, color: e.color, avatar: e.avatar });
+      break;
+    case 'kudos':
+      if (e.toMe) showBubble({ kind: 'kudos', id: newId(), from: e.from, name: e.fromName, color: snap.members.find(m => m.id === e.from)?.color, avatar: snap.members.find(m => m.id === e.from)?.avatar });
+      break;
+    case 'standup':
+      if (e.started && e.inIt) showBubble({ kind: 'standup', id: 'standup-' + e.standup.id, name: '', color: me?.color, avatar: me?.avatar });
       break;
   }
 }
@@ -214,7 +231,7 @@ function contextMenu() {
   return Menu.buildFromTemplate([
     { label: 'Open team desk', click: togglePanel },
     { type: 'separator' },
-    status('desk'), status('lunch'), status('brb'), status('dnd'), status('meeting'),
+    status('desk'), status('lunch'), status('brb'), status('dnd'), status('meeting'), status('leave'),
     { type: 'separator' },
     snap.myHelp
       ? { label: 'Cancel my help request', click: () => client.cancelHelp(snap.myHelp.id) }
@@ -252,6 +269,12 @@ function act(name, args = {}) {
     case 'help:claim': client.claimHelp(args.id); break;
     case 'wave': client.wave(args.to, args.emoji); break;
     case 'react': client.react(args.emoji); break;
+    case 'kudos': client.kudos(args.to); break;
+    case 'standup:config': client.setStandup(args.standup); break;
+    case 'standup:start': client.standupStart(); break;
+    case 'standup:next': client.standupNext(); break;
+    case 'standup:end': client.standupEnd(); break;
+    case 'open-desk': if (!panel.isVisible()) togglePanel(); break;
     case 'call': { const callId = newId(); client.invite(args.to, callId); openCall(callId, args.to); break; }
     case 'call:join': {
       const url = args.url || client.state.helps[args.callId]?.meetUrl || client.snapshot().calls.find(c => c.callId === args.callId)?.url;
@@ -281,7 +304,8 @@ async function pollMacFocus() {
   const me = client.state.me;
   if (!me || f.on === macFocus.on) { macFocus.on = f.on; return; }
   macFocus.on = f.on;
-  if (f.on && me.state !== 'dnd') {
+  if (f.on && me.state !== 'dnd' && me.state !== 'meeting') {
+    // in a meeting you stay "In a meeting" (Macs often turn on Do Not Disturb while you present)
     // the server ignores this if you set lunch / a meeting yourself
     client.setStatus('dnd', { source: 'macfocus', message: f.name && f.name !== 'Do Not Disturb' ? `${f.name} focus` : undefined });
   } else if (!f.on && me.state === 'dnd' && me.source === 'macfocus') {
@@ -335,6 +359,7 @@ ipcMain.handle('save-settings', (_e, next) => {
   saveSettings();
   client.updateSettings(settings);
   if (loginChanged) applyLoginItem();
+  refreshWeather();
   onChange(client.snapshot());
   return { ok: true };
 });
@@ -385,6 +410,8 @@ app.whenReady().then(() => {
   }, 15000);
   powerMonitor.on('lock-screen', () => onIdleChange('locked'));
   setInterval(pollMacFocus, 5000);
+  setInterval(refreshWeather, 30 * 60 * 1000);
+  refreshWeather();
   setTimeout(pollMacFocus, 1500);
   powerMonitor.on('unlock-screen', () => onIdleChange('active'));
   powerMonitor.on('resume', () => client.connect());

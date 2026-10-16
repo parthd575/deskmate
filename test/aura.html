@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Focus aura check</title>
+<style>html,body{margin:0;height:100%}</style></head>
+<body><script type="module">
+// One character in Focus mode, on the light and dark desk colours. ?t=0.3 freezes mid power-up.
+import * as THREE from '../extension/lib/three.module.min.js';
+import { addSoftLights, configureRenderer } from '../extension/lib/avatar.js';
+import { makeCharacter } from '../extension/lib/characters.js';
+import { FocusAura } from '../extension/lib/aura.js';
+const q = new URLSearchParams(location.search);
+const r = new THREE.WebGLRenderer({ antialias: true }); r.setPixelRatio(1.5); r.setSize(innerWidth, innerHeight);
+configureRenderer(r); document.body.appendChild(r.domElement);
+const scene = new THREE.Scene(); addSoftLights(scene);
+const cam = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 50); cam.position.set(0, 2.2, 5.2); cam.lookAt(0, 0.9, 0);
+const items = [];
+for (const [x, bg, model] of [[-1.3, '#eef1f6', 'barbarian'], [1.3, '#161a24', 'mage']]) {
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 6), new THREE.MeshStandardMaterial({ color: bg }));
+  floor.rotation.x = -Math.PI / 2; floor.position.x = x; scene.add(floor);
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 5), new THREE.MeshBasicMaterial({ color: bg })); back.position.set(x, 2, -1.5); scene.add(back);
+  const av = makeCharacter({ avatar: { model } }); av.pose = 'stand'; av.activity = 'idle'; av.root.position.x = x; scene.add(av.root);
+  const aura = new FocusAura(); scene.add(aura.group); aura.set(true, 0);
+  items.push({ av, aura, pos: new THREE.Vector3(x, 0, 0) });
+}
+const freeze = q.has('t') ? Number(q.get('t')) : null;
+let t = 0; let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; t = freeze ?? t + dt;
+  for (const it of items) { it.av.update(t, dt); if (freeze !== null) it.aura.power = 1; it.aura.update(t, dt, it.pos, { seated: false, faceCamera: cam }); }
+  r.render(scene, cam); requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.ready = true;
+</script></body></html>
