@@ -23,6 +23,13 @@ function init() {
   ready = (async () => {
     const stored = (await chrome.storage.sync.get('settings')).settings || {};
     settings = { ...DEFAULTS, ...stored, avatar: { ...DEFAULTS.avatar, ...(stored.avatar || {}) } };
+    // once per install: move old installs off the local development server onto the team's
+    // hosted one (choosing localhost again afterwards in Settings sticks)
+    if (!stored.serverMigrated) {
+      if (/^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(settings.server || '')) settings.server = DEFAULT_SERVER;
+      settings.serverMigrated = true;
+      await chrome.storage.sync.set({ settings: { ...stored, server: settings.server, serverMigrated: true } });
+    }
     if (!settings.userId) {
       settings.userId = (settings.email || '').toLowerCase() || newId();
       await chrome.storage.sync.set({ settings });

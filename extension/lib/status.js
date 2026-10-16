@@ -1,6 +1,7 @@
 // Status vocabulary shared by every surface (side panel, bubble, call, companion).
 
-export const DEFAULT_SERVER = 'ws://localhost:8787';
+// the team's hosted server (Cloudflare). Local development: ws://localhost:8787
+export const DEFAULT_SERVER = 'wss://deskmate.deskmate1.workers.dev';
 
 export const STATUS = {
   desk:    { label: 'At desk',       short: 'Here',     emoji: '💻', color: '#22C55E', present: true },

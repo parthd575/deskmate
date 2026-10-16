@@ -43,6 +43,14 @@ function loadSettings() {
   settings = { ...DEFAULTS, ...stored, avatar: { ...DEFAULTS.avatar, ...(stored.avatar || {}) } };
   if (!settings.userId) settings.userId = (settings.email || '').toLowerCase() || newId();
   settings.tz ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // move old installs off the local development server onto the team's hosted one
+  // (DESKMATE_SERVER=ws://localhost:8787 npm start still works for local development)
+  if (process.env.DESKMATE_SERVER) settings.server = process.env.DESKMATE_SERVER;
+  else if (!settings.serverMigrated) {   // once per install; choosing localhost again in Settings sticks
+    if (/^wss?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(settings.server || '')) settings.server = DEFAULT_SERVER;
+    settings.serverMigrated = true;
+    saveSettings();
+  }
 }
 function saveSettings() {
   fs.mkdirSync(path.dirname(SETTINGS_FILE()), { recursive: true });

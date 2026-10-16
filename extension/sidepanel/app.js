@@ -398,7 +398,7 @@ async function showSetup(firstRun) {
   $('#suNote').textContent = `Applies to everyone on this team${su.tz ? `, at ${su.time} ${su.tz.split('/').pop().replace(/_/g, ' ')} time` : ''}. People who are away, at lunch, BRB, on leave or in another meeting are skipped.`;
   const seen = state?.gchat?.seen;
   $('#gchatNote').textContent = seen ? `(now: ${[seen.availability, seen.detail].filter(Boolean).join(', ')})` : '(keep a Google Chat or Gmail tab open)';
-  if (firstRun && !draft.team) $('#advanced').open = draft.server === DEFAULT_SERVER;
+  // the server is pre-filled, so Advanced stays closed on first run
   // character picker (each character carries its own colour)
   const list = characterList();
   if (!list.some(c => c.id === draft.avatar.model)) draft.avatar.model = list[0]?.id;
