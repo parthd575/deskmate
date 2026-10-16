@@ -1,0 +1,22 @@
+# Deskmate server on Cloudflare (Workers Free plan works).
+# Deploy:  npx wrangler login   then   npm run deploy
+name = "deskmate"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# One Durable Object per team code = one room. SQLite storage is the kind the Free plan allows.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "TeamRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TeamRoom"]
+
+[vars]
+# Only accept people whose work email ends with this domain (recommended), e.g. "elevationservices.co.uk"
+ALLOWED_DOMAIN = ""
+# Comma-separated allow-list of team codes. Empty = any code works.
+TEAM_CODES = ""
+# For Built-in audio calls on strict networks, add a TURN server (JSON). Google Meet needs nothing.
+# ICE_SERVERS = '[{"urls":["stun:stun.l.google.com:19302"]}]'

@@ -3,6 +3,14 @@
 
 const PING_MS = 20000; // also keeps the MV3 service worker alive (Chrome 116+)
 
+// The team goes in the URL too: the Cloudflare server picks the team's room before the socket opens.
+// Accepts ws(s):// or http(s):// (e.g. the https://….workers.dev address Cloudflare prints).
+export function socketUrl(server, team) {
+  const u = new URL(String(server).trim().replace(/^http(s?):\/\//i, 'ws$1://'));
+  u.searchParams.set('team', String(team || '').trim().toLowerCase());
+  return u.toString();
+}
+
 export class DeskClient {
   constructor({ settings, role = 'main', WebSocketImpl = globalThis.WebSocket }) {
     this.settings = settings;
@@ -56,7 +64,7 @@ export class DeskClient {
     this.state.conn = 'connecting';
     this.#emit();
     let ws;
-    try { ws = new this.WS(this.settings.server); } catch (e) {
+    try { ws = new this.WS(socketUrl(this.settings.server, this.settings.team)); } catch (e) {
       this.state.conn = 'error'; this.state.error = 'bad_server_url'; this.#emit(); return;
     }
     this.ws = ws;
@@ -69,7 +77,8 @@ export class DeskClient {
         status: this.pendingStatus || undefined,
       });
       clearInterval(this.pingTimer);
-      this.pingTimer = setInterval(() => this.#send({ type: 'ping', t: Date.now() }), PING_MS);
+      // exactly '{"type":"ping"}': the Cloudflare server answers it without waking up
+      this.pingTimer = setInterval(() => this.#send({ type: 'ping' }), PING_MS);
     };
     ws.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()); } catch { return; }
@@ -167,11 +176,13 @@ export class DeskClient {
         this.#event({ type: 'help:meet', id: msg.id, url: msg.url, help: h, mine: h && st.me && h.from === st.me.id, helping: h && st.me && h.claimedBy === st.me.id, byMe: st.me && msg.by === st.me.id });
         return;
       }
-      case 'help:closed':
+      case 'help:closed': {
+        const h = st.helps[msg.id];
         delete st.helps[msg.id];
         this.#emit();
-        this.#event({ type: 'help:closed', id: msg.id, reason: msg.reason });
+        this.#event({ type: 'help:closed', id: msg.id, reason: msg.reason, meetUrl: h?.meetUrl || null });
         return;
+      }
       case 'help:taken':
       case 'help:gone':
         this.#event(msg);
@@ -219,6 +230,8 @@ export class DeskClient {
   askHelp(topic = '', urgency = 'normal', to = null) { this.#send({ type: 'help', topic, urgency, to }); }
   cancelHelp(id) { this.#send({ type: 'help:cancel', id }); }
   endHelp(id) { this.#send({ type: 'help:end', id }); }
+  // end whichever of my help requests uses this Google Meet (asker or helper)
+  endHelpByMeet(url) { this.#send({ type: 'help:end', url }); }
   claimHelp(id) { this.#send({ type: 'help:claim', id }); }
   wave(to, emoji) { this.#send({ type: 'wave', to, emoji }); }
   react(emoji) { this.#send({ type: 'react', emoji }); }

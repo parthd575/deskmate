@@ -118,6 +118,9 @@ function onEvent(e, snap) {
     case 'help:closed':
       chrome.notifications.clear(`help:${e.id}`);
       broadcastToBubbles({ type: 'bubble:close', id: e.id });
+      clearTimeout(meetFallbacks.get(e.id));
+      // "End call" (or the asker cancelling) also leaves the Google Meet on this computer
+      if (e.meetUrl && ['ended', 'cancelled', 'replaced'].includes(e.reason)) closeMeet(e.meetUrl);
       break;
 
     case 'wave':
@@ -218,12 +221,70 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   const m = info.url && info.url.match(MEET_CODE);
   if (!cb || !m) return;
   meetWatch.delete(tabId);
-  cb(`https://meet.google.com/${m[1]}`);
+  const url = `https://meet.google.com/${m[1]}`;
+  rememberMeetTab(url, tabId);
+  cb(url);
 });
+
+// Which tab shows which meeting. Kept in chrome.storage.session, not in memory: Chrome stops this
+// service worker after ~30 s of quiet, and a meeting lasts much longer than that.
+const meetCodeOf = (url) => (url || '').match(MEET_CODE)?.[1] || null;
+async function meetTabMap() { return (await chrome.storage.session.get('meetTabs')).meetTabs || {}; }
+async function rememberMeetTab(url, tabId) {
+  const map = await meetTabMap();
+  map[tabId] = `https://meet.google.com/${meetCodeOf(url)}`;
+  await chrome.storage.session.set({ meetTabs: map });
+}
+async function forgetMeetTab(tabId) {
+  const map = await meetTabMap();
+  const url = map[tabId] || null;
+  if (url) { delete map[tabId]; await chrome.storage.session.set({ meetTabs: map }); }
+  return url;
+}
+
+// Leaving the meeting (Meet's Leave call button, closing its tab, or navigating away)
+// ends the help request, which in turn closes the Meet for the other person.
+async function leftMeet(url) {
+  await init();
+  // the worker may have just been woken up by this: wait for the connection to come back
+  for (let i = 0; i < 40 && client.state.conn !== 'online'; i++) await new Promise(r => setTimeout(r, 250));
+  client.endHelpByMeet(`https://meet.google.com/${meetCodeOf(url)}`);
+}
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const url = await forgetMeetTab(tabId);
+  if (url) leftMeet(url);
+});
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  if (!info.url) return;
+  const map = await meetTabMap();
+  const url = map[tabId];
+  if (!url || meetCodeOf(info.url) === meetCodeOf(url)) return;
+  await forgetMeetTab(tabId); // went somewhere else in this tab
+  leftMeet(url);
+});
+
+async function closeMeet(url) {
+  const code = meetCodeOf(url);
+  if (!code) return;
+  const map = await meetTabMap();
+  const ids = new Set(Object.keys(map).filter(id => meetCodeOf(map[id]) === code).map(Number));
+  // also catch the meeting if it was opened by hand from the link
+  try {
+    for (const t of await chrome.tabs.query({ url: 'https://meet.google.com/*' })) {
+      if (meetCodeOf(t.url || t.pendingUrl) === code) ids.add(t.id);
+    }
+  } catch {}
+  // forget first, so closing these tabs isn't treated as "left"
+  for (const id of ids) delete map[id];
+  await chrome.storage.session.set({ meetTabs: map });
+  for (const id of ids) chrome.tabs.remove(id).catch(() => {});
+}
 chrome.tabs.onRemoved.addListener((tabId) => meetWatch.delete(tabId));
 
-function openMeet(url) {
-  if (url && MEET_CODE.test(url)) chrome.tabs.create({ url, active: true });
+async function openMeet(url) {
+  if (!meetCodeOf(url)) return;
+  const tab = await chrome.tabs.create({ url, active: true });
+  await rememberMeetTab(url, tab.id);
 }
 
 // If the helper can't create a Meet (e.g. they joined from the Mac app only), the asker makes one.
@@ -379,6 +440,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   (async () => {
     await init();
     if (msg.type === 'action') { act(msg.name, msg.args); reply({ ok: true }); }
+    else if (msg.type === 'meet:open') { if (sender.tab) await rememberMeetTab(msg.url, sender.tab.id); reply({ ok: true }); }
+    else if (msg.type === 'meet:left') { if (sender.tab) await forgetMeetTab(sender.tab.id); await leftMeet(msg.url); reply({ ok: true }); }
     else if (msg.type === 'settings:save') {
       const next = { ...settings, ...msg.settings };
       // identity = work email, so the Chrome extension and the Mac app merge into one person

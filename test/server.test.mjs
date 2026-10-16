@@ -10,19 +10,24 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = createRequire(path.join(root, 'server/package.json'))('ws');
 const PORT = 18000 + Math.floor(Math.random() * 1000);
-const URL = `ws://localhost:${PORT}`;
+// SERVER=ws://localhost:8787 runs the same tests against an already-running server
+// (e.g. the Cloudflare one under `wrangler dev --var OFFLINE_GRACE_MS:300`)
+const URL = process.env.SERVER || `ws://localhost:${PORT}`;
 let srv;
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
 before(async () => {
+  if (process.env.SERVER) return;
   srv = spawn(process.execPath, ['index.js'], { cwd: path.join(root, 'server'), env: { ...process.env, PORT: String(PORT), OFFLINE_GRACE_MS: '300' } });
   await new Promise(r => srv.stdout.on('data', r));
 });
-after(() => srv.kill());
+after(() => srv?.kill());
 
+const RUN = Date.now().toString(36); // fresh rooms on every run (servers may keep state)
 function client(team, id, role = 'main') {
+  team = `${team}-${RUN}`;
   return new Promise((resolve) => {
-    const ws = new WebSocket(URL);
+    const ws = new WebSocket(`${URL}/?team=${encodeURIComponent(team)}`);
     ws.log = [];
     ws.on('message', d => ws.log.push(JSON.parse(d)));
     ws.on('open', () => {
@@ -135,5 +140,26 @@ test('Google Meet link is shared only by the asker or helper, and only a real Me
   const m = last(asker, 'help:meet');
   assert.equal(m.url, 'https://meet.google.com/abc-defg-hij');
   assert.equal(m.by, 'help@x.com');
+  [asker, helper, other].forEach(w => w.close());
+});
+
+test('help:end by Meet URL closes only a request I am part of', async () => {
+  const asker = await client('t10', 'ask@x.com');
+  const helper = await client('t10', 'help@x.com');
+  const other = await client('t10', 'other@x.com');
+  send(asker, { type: 'help', topic: 'stuck' });
+  await wait(80);
+  const id = last(helper, 'help:new').help.id;
+  send(helper, { type: 'help:claim', id });
+  await wait(60);
+  const url = 'https://meet.google.com/abc-defg-hij';
+  send(helper, { type: 'help:meet', id, url });
+  await wait(60);
+  send(other, { type: 'help:end', url });
+  await wait(80);
+  assert.equal(last(asker, 'help:closed'), undefined);
+  send(helper, { type: 'help:end', url });
+  await wait(80);
+  assert.equal(last(asker, 'help:closed').reason, 'ended');
   [asker, helper, other].forEach(w => w.close());
 });

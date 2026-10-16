@@ -8,7 +8,7 @@ It has three parts:
 |---|---|
 | **Chrome extension** (`extension/`) | Desk in Chrome's side panel, help pop-ups on whatever page you're on, Google Meet hand-off, auto-away. Runs on macOS, Windows, Linux and ChromeOS. |
 | **Mac menu-bar app** (`companion/`) | Icon and live count in the top menu bar, a one-click desk dropdown, help/call bubbles that float over **every** app (even full-screen), global shortcuts, and macOS Focus → Deskmate Focus. |
-| **Server** (`server/`) | A small Node WebSocket service for presence, help requests and sharing the Meet link (plus signalling for the optional built-in audio). It never sees or stores audio. |
+| **Server** (`cloudflare/` or `server/`) | A small WebSocket service, hosted free on Cloudflare or as a Node process, for presence, help requests and sharing the Meet link (plus signalling for the optional built-in audio). It never sees or stores audio. |
 
 ![The six characters: Robo, Knight, Mage, Barbarian, Rogue and Hooded Rogue](docs/screenshots/characters.png)
 
@@ -78,7 +78,7 @@ node test/demo.cjs --live   # keeps 5 bots online in a team; set TEAM=<your code
 - The first person to tap **Join** claims it. Everyone else's bubble changes to "Priya is on it ✓", so no one doubles up.
 - The helper's browser opens `meet.google.com/new` with their Google account. As soon as Meet gives the meeting its code, Deskmate shares the link and it **opens automatically for the person who asked**. If no link arrives within 15 seconds (say the helper joined from the Mac app only), the asker's browser creates the Meet instead.
 - Calling someone from their card works the same way: they get a bubble, tap **Join**, and land in your Meet.
-- Either person can tap **End call** in the panel to close the request. Anyone can **Join** a call in progress from the desk.
+- To finish, either person can tap **End call** in the Deskmate panel, press Meet's own red **Leave call** button, or just close the Meet tab. Any of these closes the request and closes the Meet tab for the other person too, so nobody is left sitting in an empty meeting. Anyone can **Join** a call in progress from the desk.
 - Prefer no Google Meet? **Settings → Advanced → Calls open in → Built-in audio** switches back to peer-to-peer WebRTC audio (mute, speaking ring, up to 6 people).
 
 **Fewer interruptions**
@@ -103,31 +103,43 @@ node test/demo.cjs --live   # keeps 5 bots online in a team; set TEAM=<your code
 
 ## Deploying for your team
 
-### 1. Host the server
+### 1. Host the server (free, on Cloudflare)
 
-The server is a ~370-line Node file with one dependency (`ws`). Any host that supports WebSockets will run it, for example Render, Railway, Fly.io, Cloud Run or a small VM. **Use TLS (`wss://`) in production.** Most hosts provide it automatically.
+The `cloudflare/` folder runs the server on **Cloudflare Workers + Durable Objects**. It works on the **free Workers plan**, which allows company use. Each team code gets its own Durable Object, a small "room" that every teammate connects to. Idle connections hibernate, so a team that stays connected all day costs nothing. The free plan includes 100,000 requests a day, and a 20-person team uses a few thousand.
+
+One-time setup, from a Terminal on your Mac:
+
+```bash
+cd cloudflare
+npm install
+npx wrangler login        # opens the browser to sign in to (or create) a free Cloudflare account
+npm run deploy            # prints your server address, e.g. https://deskmate.<your-subdomain>.workers.dev
+```
+
+Paste that address into Deskmate's **Settings → Advanced → Server URL**. The `https://` address works as it is; Deskmate switches it to `wss://`. To redeploy after changes, run `npm run deploy` again. People reconnect on their own within a few seconds.
+
+Settings live in `cloudflare/wrangler.toml` under `[vars]`:
+
+| Variable | Purpose |
+|---|---|
+| `ALLOWED_DOMAIN` | Only accept people whose email ends with this domain, e.g. `elevationservices.co.uk` (recommended) |
+| `TEAM_CODES` | Comma-separated allow-list of team codes (empty = any) |
+| `ICE_SERVERS` | JSON list of STUN/TURN servers, only for *Built-in audio* calls |
+
+In `cloudflare/`, `npm run logs` streams live logs and `npm run dev` runs the Cloudflare server locally on port 8787.
+
+**Why not Vercel?** Vercel's free Hobby plan is for non-commercial use only. It also cuts WebSocket connections every 5 minutes and spreads people across separate server copies, so Deskmate would need Vercel Pro plus a Redis database.
+
+**Running your own Node server instead:** `server/` runs the same logic as a plain Node process (`npm start`, or the Dockerfile) on any host that keeps a process running. It reads the same settings as environment variables, plus `PORT`.
 
 ```bash
 docker build -t deskmate-server server/
 docker run -p 8787:8787 -e ALLOWED_DOMAIN=elevationservices.co.uk deskmate-server
 ```
 
-| Env var | Purpose |
-|---|---|
-| `PORT` | Default `8787` |
-| `ALLOWED_DOMAIN` | Only accept people whose email ends with this domain |
-| `TEAM_CODES` | Comma-separated allow-list of team codes (empty = any) |
-| `ICE_SERVERS` | JSON list of STUN/TURN servers handed to calls (see below) |
-
-**TURN for corporate networks** (only for *Built-in audio* calls; Google Meet needs nothing extra): peer-to-peer audio works on most networks with the default Google STUN servers. Strict firewalls need a TURN relay, either self-hosted [coturn](https://github.com/coturn/coturn) or a managed service such as Twilio, Cloudflare Calls or Metered:
-
-```bash
-ICE_SERVERS='[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]'
-```
-
 ### 2. Point the clients at it
 
-Change `DEFAULT_SERVER` in `extension/lib/status.js` to your `wss://` URL so nobody has to type it. Otherwise each person pastes it under **Advanced** during setup.
+Change `DEFAULT_SERVER` in `extension/lib/status.js` to your `wss://…workers.dev` address, then run `npm run sync` in `companion/`, so nobody has to type it. Otherwise each person pastes it under **Advanced** during setup.
 
 ### 3. Distribute the extension
 
@@ -176,9 +188,10 @@ The scope used is `chat.users.availability.readonly`. Deskmate never writes to y
  └──────────────┬────────────────┘          └──────────────┬───────────────┘
                 │      presence / help / call signalling (wss)
                 └────────────────────┬──────────────────────┘
-                              ┌──────▼──────┐
-                              │  server/    │  in-memory rooms per team code
-                              └─────────────┘
+                     ┌──────────────▼──────────────┐
+                     │ Cloudflare Worker           │  one Durable Object per team code
+                     │ (or server/ on Node)        │  same room logic: server/room.js
+                     └─────────────────────────────┘
      calls happen in Google Meet; the server only passes the meet.google.com link along
 ```
 
@@ -188,10 +201,10 @@ The Mac app reuses the extension's UI files. `npm run sync` copies them in, and 
 
 ## Privacy & security notes
 
-- The server keeps **nothing on disk**. Presence lives in memory and disappears when people disconnect.
+- The server keeps only the live room: who's online, their status and any open help requests. On Cloudflare it's saved in the team's Durable Object so it survives restarts, and it's deleted once everyone has left. The Node server keeps it in memory only.
 - Calls run in Google Meet under each person's own Google account. The server only passes the Meet link between the asker and the helper, and only accepts real `https://meet.google.com/xxx-xxxx-xxx` links.
 - With *Built-in audio*, calls are encrypted peer-to-peer WebRTC; the server only relays set-up messages between people in the same call.
-- The content script runs on web pages only to show the help bubble inside an isolated iframe. It never reads page content. The extension doesn't request the `tabs` permission; its only site permission is `meet.google.com`, used to read the new meeting's code from the tab it opened.
+- The content script runs on web pages only to show the help bubble inside an isolated iframe. It never reads page content. The extension doesn't request the `tabs` permission; its only site permission is `meet.google.com`, used to read the new meeting's code and to notice when you leave the meeting (`content/meet.js` only looks for Meet's Leave call button).
 - **MVP trust model:** anyone who knows the team code and the server URL can join. Lock it down with `ALLOWED_DOMAIN` and `TEAM_CODES`, or add Google sign-in verification (roadmap item 1) before rolling it out widely.
 
 ---
@@ -204,7 +217,8 @@ cd server && npm install && cd ..
 npm test                  # protocol rules: status priority, help claims, Meet links, call isolation, Mac Focus parsing
 npm run server &          # then, with the server running:
 npm run test:e2e          # 3 real Chrome profiles: statuses, help bubble, built-in call, End call, Focus mode
-npm run test:meet         # 2 profiles: Join → helper's Meet → same link opens for the asker (meet.google.com is stubbed)
+SERVER=ws://localhost:8787 node --test test/server.test.mjs   # same protocol tests against a running server, e.g. npm run cf:dev
+npm run test:meet         # 2 profiles: Join → helper's Meet → same link opens for the asker → End call / Leave call / closing the tab ends it for both (meet.google.com is stubbed)
 npm run demo              # screenshots of a 6-person desk (light + dark) and the help bubble → test/shots
 ```
 
@@ -223,7 +237,6 @@ The end-to-end test loads the real extension into three Chrome profiles. It chec
 7. **Scheduled statuses**: "Lunch at 1:00 every weekday", working hours and time-zone shading on the desk.
 8. **Missed-help digest**: a gentle summary of requests you missed while in Focus.
 9. **Windows tray build** of the companion (the code is cross-platform. It needs a Windows icon and installer config).
-10. **Persistence** (Redis) so the server can run multiple instances behind a load balancer.
 
 ## Project layout
 
@@ -236,8 +249,10 @@ extension/   Chrome MV3 extension (load this folder unpacked)
   bubble/              animated help / call / wave pop-up
   call/                built-in WebRTC audio window (when Built-in audio is chosen)
   content/content.js   injects bubbles into the page you're viewing
+  content/meet.js      on meet.google.com: notices when you leave a Deskmate meeting
 companion/   Electron menu-bar app (macOS first); macfocus.js reads the Mac's Focus state
-server/      Node WebSocket presence + signalling server (+ Dockerfile)
+server/      room.js (the room logic) + index.js, a Node WebSocket server (+ Dockerfile)
+cloudflare/  the same server on Cloudflare Workers + Durable Objects (free hosting)
 test/        protocol tests, end-to-end + Meet Playwright tests, demo bots, models.html (every character and pose)
 docs/        screenshots
 ```

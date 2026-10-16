@@ -1,0 +1,14 @@
+{
+  "name": "deskmate-cloudflare",
+  "private": true,
+  "description": "Deskmate server on Cloudflare Workers + Durable Objects (free plan)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "logs": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

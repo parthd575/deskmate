@@ -1,5 +1,6 @@
 // Audio huddle: small mesh WebRTC call (up to ~6 people), signalled over the Deskmate server.
 import { initials, display } from '../lib/status.js';
+import { socketUrl } from '../lib/client.js';
 
 const params = new URLSearchParams(location.search);
 const callId = params.get('id');
@@ -42,7 +43,7 @@ async function main() {
 
 function connect() {
   const s = cfg.settings;
-  ws = new WebSocket(s.server);
+  ws = new WebSocket(socketUrl(s.server, s.team));
   ws.onopen = () => ws.send(JSON.stringify({
     type: 'hello', team: s.team, role: 'call',
     user: { id: s.userId, name: s.name, email: s.email, color: s.color, avatar: s.avatar, tz: s.tz },

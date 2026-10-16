@@ -405,8 +405,9 @@ function rebuildPreview() {
 $('#setupForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
-  const server = f.elements.server.value.trim();
-  if (!/^wss?:\/\//.test(server)) { $('#setupErr').textContent = 'Server URL must start with ws:// or wss://'; $('#advanced').open = true; return; }
+  // the https://….workers.dev address Cloudflare prints works too
+  const server = f.elements.server.value.trim().replace(/^http(s?):\/\//i, 'ws$1://').replace(/\/+$/, '');
+  if (!/^wss?:\/\/[^/]/.test(server)) { $('#setupErr').textContent = 'Server URL must start with wss://, ws:// or https://'; $('#advanced').open = true; return; }
   const settings = {
     ...(state?.settings || {}),
     ...draft,
