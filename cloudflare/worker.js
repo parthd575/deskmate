@@ -9,12 +9,12 @@
 //   - room timers become a Durable Object alarm
 //   - keep-alive pings get an automatic reply without waking the object
 import { DurableObject } from 'cloudflare:workers';
-import { Room, configFromEnv, newId, teamCode } from '../server/room.js';
+import { Room, configFromEnv, newId, teamCode, PROTOCOL } from '../server/room.js';
 
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname === '/health') return Response.json({ ok: true });
+    if (url.pathname === '/health') return Response.json({ ok: true, protocol: PROTOCOL });
     if (req.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('Deskmate server. Connect via WebSocket.', { headers: { 'content-type': 'text/plain' } });
     }

@@ -5,6 +5,9 @@ const PING_MS = 20000; // also keeps the MV3 service worker alive (Chrome 116+)
 
 // The team goes in the URL too: the Cloudflare server picks the team's room before the socket opens.
 // Accepts ws(s):// or http(s):// (e.g. the https://….workers.dev address Cloudflare prints).
+// the server protocol this client needs (see server/room.js PROTOCOL)
+export const NEEDS_PROTOCOL = 3;
+
 export function socketUrl(server, team) {
   const u = new URL(String(server).trim().replace(/^http(s?):\/\//i, 'ws$1://'));
   u.searchParams.set('team', String(team || '').trim().toLowerCase());
@@ -49,6 +52,7 @@ export class DeskClient {
       iceServers: st.iceServers,
       team: this.settings.team,
       teamCfg: st.teamCfg,        // team-wide settings (stand-up schedule)
+      serverOutdated: st.conn === 'online' && (st.protocol || 0) < NEEDS_PROTOCOL,
       standup: st.standup,        // the stand-up happening right now, if any
     };
   }
@@ -139,6 +143,7 @@ export class DeskClient {
         st.calls = msg.calls;
         st.iceServers = msg.iceServers;
         st.teamCfg = msg.teamCfg || { standup: null };
+        st.protocol = msg.protocol || 0;   // older servers don't say
         st.standup = msg.standup || null;
         // re-assert the status we had before a reconnect
         if (this.pendingStatus && msg.me.state !== this.pendingStatus.state) {
@@ -171,7 +176,18 @@ export class DeskClient {
         const h = st.helps[msg.id];
         if (h) { h.claimedBy = msg.by; h.claimedName = msg.byName; }
         this.#emit();
-        this.#event({ type: 'help:claimed', ...msg, help: h, mine: h && st.me && h.from === st.me.id, byMe: st.me && msg.by === st.me.id, byThisDevice: msg.bySocket === st.socketId });
+        if (h) h.host = msg.host || msg.by;   // older servers don't pick: the helper makes the Meet
+        this.#event({ type: 'help:claimed', ...msg, help: h, mine: h && st.me && h.from === st.me.id, byMe: st.me && msg.by === st.me.id, byThisDevice: msg.bySocket === st.socketId, iHost: !!(st.me && (msg.host || msg.by) === st.me.id) });
+        return;
+      }
+      case 'help:nudge':
+        this.#event({ ...msg, toMe: !!(st.me && msg.host === st.me.id) });
+        return;
+      case 'help:host': {
+        const h = st.helps[msg.id];
+        if (h) h.host = msg.host;
+        this.#emit();
+        this.#event({ ...msg, iHost: !!(st.me && msg.host === st.me.id) });
         return;
       }
       case 'help:meet': {
@@ -217,10 +233,15 @@ export class DeskClient {
         return;
       case 'wave':
       case 'react':
+      case 'call:declined':
+      case 'call:url':
+      case 'call:accepted':
+      case 'call:ended':
+        this.#event(msg);
+        return;
       case 'call:invite':
       case 'call:invited':
-      case 'call:declined':
-        this.#event(msg);
+        this.#event({ ...msg, iHost: !!(st.me && msg.host === st.me.id) });
         return;
       case 'error':
         st.error = msg.error;
@@ -265,8 +286,12 @@ export class DeskClient {
   standupStart() { this.#send({ type: 'standup:start' }); }
   standupNext() { this.#send({ type: 'standup:next' }); }
   standupEnd() { this.#send({ type: 'standup:end' }); }
-  invite(to, callId, url) { this.#send({ type: 'call:invite', to, callId, url }); }
+  invite(to, callId, url, meet = false) { this.#send({ type: 'call:invite', to, callId, url, meet }); }
+  acceptCall(callId) { this.#send({ type: 'call:accept', callId }); }
+  callUrl(callId, url) { this.#send({ type: 'call:url', callId, url }); }
   shareMeet(id, url) { this.#send({ type: 'help:meet', id, url }); }
+  rehost(id) { this.#send({ type: 'help:rehost', id }); }
+  nudge(id) { this.#send({ type: 'help:nudge', id }); }
   decline(to, callId) { this.#send({ type: 'call:decline', to, callId }); }
 }
 

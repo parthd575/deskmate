@@ -93,6 +93,11 @@ function onChange(snap) {
   updateBadge(snap);
 }
 
+// a short message in the side panel (if it's open)
+function uiToast(text) {
+  for (const p of ports) { try { p.postMessage({ type: 'event', event: { type: 'toast', text } }); } catch {} }
+}
+
 function onEvent(e, snap) {
   for (const p of ports) { try { p.postMessage({ type: 'event', event: e }); } catch {} }
   const me = snap.me;
@@ -126,22 +131,31 @@ function onEvent(e, snap) {
       // open the call on the surface that clicked "Join"; the asker's call opens in the
       // Mac app when it's running, otherwise here
       if (settings.callApp === 'meet') {
-        // Google Meet: the helper's browser creates the meeting and shares the link;
-        // the asker's browser opens it as soon as it arrives
-        if (e.byMe) startMeet(url => client.shareMeet(e.id, url));
-        else if (e.mine) meetFallback(e.id);
+        // Google Meet: exactly one browser makes the meeting (the server picks the helper, or
+        // the asker if the helper has no Chrome extension) and shares the link; the other
+        // person's browser opens that same link as soon as it arrives
+        if (e.iHost) startMeet('help', e.id);
       } else if (e.byThisDevice || (e.mine && !companionOwnsPopups)) openCall(e.callId);
       break;
 
     case 'help:meet':
-      clearTimeout(meetFallbacks.get(e.id));
-      if ((e.mine || e.helping) && !e.byMe) openMeet(e.url);
+      if ((e.mine || e.helping) && (!e.byMe || e.again)) openMeet(e.url);
+      break;
+
+    case 'help:nudge':
+      // the other person is waiting for the link: re-check the tab I'm making it in
+      if (e.toMe) checkAllMaking();
+      break;
+
+    case 'help:host':
+      // the other person couldn't make the Meet, so it's me now (or it moved away from me)
+      if (e.iHost) startMeet('help', e.id);
+      else stopMaking('help', e.id);
       break;
 
     case 'help:closed':
       chrome.notifications.clear(`help:${e.id}`);
       broadcastToBubbles({ type: 'bubble:close', id: e.id });
-      clearTimeout(meetFallbacks.get(e.id));
       // "End call" (or the asker cancelling) also leaves the Google Meet on this computer
       if (e.meetUrl && ['ended', 'cancelled', 'replaced'].includes(e.reason)) closeMeet(e.meetUrl);
       break;
@@ -166,16 +180,37 @@ function onEvent(e, snap) {
 
     case 'call:invite':
       if (companionOwnsPopups) break;
+      if (e.meet) callState('in', e.callId, { from: e.from, url: e.url || null });
       if (!focused) chime('invite');
       showBubble({ kind: 'invite', id: e.callId, url: e.url, from: e.from, name: e.fromName, color: e.color, avatar: e.avatar })
-        .then(shown => shown || (pendingInviteUrls.set(e.callId, e.url), notify(`invite:${e.callId}:${e.from}`, {   // fallback when no web page is open
-          title: `${e.fromName} needs help`,
-          message: 'Join the audio call?',
+        .then(shown => shown || notify(`invite:${e.callId}:${e.from}`, {   // fallback when no web page is open
+          title: `${e.fromName} is calling you`,
+          message: e.meet ? 'Join them on Google Meet?' : 'Join the audio call?',
           buttons: [{ title: 'Join' }, { title: 'Not now' }],
           requireInteraction: true,
           priority: 2,
           silent: focused,
-        })));
+        }));
+      break;
+
+    // ---- direct Google Meet calls
+    case 'call:invited':
+      // I'm calling someone: if the server picked me to make the meeting, make it now
+      if (e.host) callState('out', e.callId, { to: e.to });
+      if (e.iHost) startMeet('call', e.callId);
+      break;
+    case 'call:url':
+      // the meeting link exists (or, right after I tapped Join, here's where it is / who makes it)
+      callLink(e);
+      break;
+    case 'call:accepted':
+      uiToast(`${e.byName} is joining you on Google Meet`);
+      break;
+    case 'call:ended':
+      chrome.notifications.clear(`invite:${e.callId}:${e.from || ''}`);
+      broadcastToBubbles({ type: 'bubble:close', id: e.callId });
+      if (e.url) closeMeet(e.url);
+      callState('clear', e.callId);
       break;
   }
 }
@@ -213,14 +248,14 @@ chrome.notifications.onButtonClicked.addListener(async (id, btn) => {
   await init();
   const [kind, a, b] = id.split(':');
   if (kind === 'help' && btn === 0) client.claimHelp(a);
-  if (kind === 'invite') btn === 0 ? act('call:accept', { callId: a, from: b, url: pendingInviteUrls.get(a) }) : client.decline(b, a);
+  if (kind === 'invite') btn === 0 ? act('call:accept', { callId: a, from: b }) : client.decline(b, a);
   chrome.notifications.clear(id);
 });
 chrome.notifications.onClicked.addListener(async (id) => {
   await init();
   const [kind, a] = id.split(':');
   if (kind === 'help') client.claimHelp(a);
-  if (kind === 'invite') act('call:accept', { callId: a, url: pendingInviteUrls.get(a) });
+  if (kind === 'invite') act('call:accept', { callId: a });
   chrome.notifications.clear(id);
 });
 
@@ -262,24 +297,99 @@ function broadcastToBubbles(msg) {
 // We watch that tab (host permission for meet.google.com lets us read its URL) until
 // it lands on the meeting code, then share the link.
 const MEET_CODE = /^https:\/\/meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#]|$)/;
-const meetFallbacks = new Map();
-const pendingInviteUrls = new Map();
-const meetWatch = new Map(); // tabId -> callback
+// Everything here lives in chrome.storage.session, not in memory: Chrome stops this service
+// worker after ~30 s of quiet, and making a Meet (account chooser, sign-in…) can take longer.
+const session = async (key) => (await chrome.storage.session.get(key))[key] || {};
+const saveSession = (key, v) => chrome.storage.session.set({ [key]: v });
 
-async function startMeet(onUrl) {
+// Meets being made in a tab: tabId -> { kind: 'help' | 'call', id }
+async function startMeet(kind, id) {
+  const making = await session('making');
+  const already = Object.entries(making).find(([, m]) => m.kind === kind && m.id === id);
+  if (already) {   // never two meetings for the same call: bring the one being made to the front
+    chrome.tabs.update(Number(already[0]), { active: true }).catch(() => {});
+    return;
+  }
   const tab = await chrome.tabs.create({ url: 'https://meet.google.com/new', active: true });
-  meetWatch.set(tab.id, onUrl);
-  setTimeout(() => meetWatch.delete(tab.id), 3 * 60 * 1000); // e.g. still on the Google sign-in page
+  making[tab.id] = { kind, id, at: Date.now() };
+  await saveSession('making', making);
+  // Google can land on the meeting code before we've even noted the tab down: check now too
+  checkMaking(tab.id);
 }
-chrome.tabs.onUpdated.addListener((tabId, info) => {
-  const cb = meetWatch.get(tabId);
-  const m = info.url && info.url.match(MEET_CODE);
-  if (!cb || !m) return;
-  meetWatch.delete(tabId);
-  const url = `https://meet.google.com/${m[1]}`;
-  rememberMeetTab(url, tabId);
-  cb(url);
+
+// A tab we're making a Meet in has reached its meeting code: share the link. Called from several
+// places (tab URL changes, page load, the Meet page itself, a nudge from the other person) so a
+// missed event can't leave the other person waiting.
+let finishing = Promise.resolve();
+function finishMaking(tabId, rawUrl) {
+  finishing = finishing.then(async () => {
+    const code = meetCodeOf(rawUrl);
+    if (!code) return;
+    const making = await session('making');
+    const job = making[tabId];
+    if (!job) return;
+    delete making[tabId];
+    await saveSession('making', making);
+    const url = `https://meet.google.com/${code}`;
+    await rememberMeetTab(url, tabId);
+    await online();
+    if (job.kind === 'help') client.shareMeet(job.id, url);
+    else client.callUrl(job.id, url);
+  }).catch(e => console.warn('finishMaking', e));
+  return finishing;
+}
+async function checkMaking(tabId) {
+  try { const t = await chrome.tabs.get(tabId); finishMaking(tabId, t.url || t.pendingUrl); } catch {}
+}
+async function checkAllMaking() {
+  for (const tabId of Object.keys(await session('making'))) await checkMaking(Number(tabId));
+}
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  const url = info.url || (info.status === 'complete' ? tab?.url : null);
+  if (url && meetCodeOf(url)) finishMaking(tabId, url);
 });
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const making = await session('making');
+  if (making[tabId]) { delete making[tabId]; await saveSession('making', making); }
+});
+
+const askedAgain = {};   // helpId -> when "Open call" was tapped while waiting for the link
+
+async function stopMaking(kind, id) {
+  const making = await session('making');
+  for (const [tabId, m] of Object.entries(making)) {
+    if (m.kind === kind && m.id === id) { delete making[tabId]; chrome.tabs.remove(Number(tabId)).catch(() => {}); }
+  }
+  await saveSession('making', making);
+}
+
+// wake-up helper: wait (briefly) for the team connection
+async function online() {
+  await init();
+  for (let i = 0; i < 40 && client.state.conn !== 'online'; i++) await new Promise(r => setTimeout(r, 250));
+}
+
+// Direct calls on this computer: 'in' (someone's calling me) / 'out' (I'm calling) / accepted
+async function callState(op, callId, data = {}) {
+  const calls = await session('calls');
+  if (op === 'clear') delete calls[callId];
+  else calls[callId] = { ...(calls[callId] || {}), ...data, dir: op === 'accept' ? (calls[callId]?.dir || 'in') : op, ...(op === 'accept' ? { accepted: true } : {}) };
+  await saveSession('calls', calls);
+  return calls[callId];
+}
+// A direct call's Meet link arrived (or the server told me where it is after I tapped Join)
+async function callLink(e) {
+  const me = client.state.me?.id;
+  const c = (await session('calls'))[e.callId];
+  const caller = c?.dir === 'out';
+  if (e.url) {
+    if (c) await callState(c.dir, e.callId, { url: e.url });
+    // the caller and the person who said yes both open the same link (the maker already has it open)
+    if (e.by !== me && (caller || e.accepted)) openMeet(e.url);
+  } else if (e.host === me && e.accepted && !caller) {
+    startMeet('call', e.callId);     // the caller couldn't make one (no Chrome extension): I make it
+  }
+}
 
 // Which tab shows which meeting. Kept in chrome.storage.session, not in memory: Chrome stops this
 // service worker after ~30 s of quiet, and a meeting lasts much longer than that.
@@ -334,21 +444,23 @@ async function closeMeet(url) {
   await chrome.storage.session.set({ meetTabs: map });
   for (const id of ids) chrome.tabs.remove(id).catch(() => {});
 }
-chrome.tabs.onRemoved.addListener((tabId) => meetWatch.delete(tabId));
 
+// Open a meeting link, reusing the tab if this meeting is already open ("Open call" never
+// starts a second meeting or a second copy of the same one)
 async function openMeet(url) {
-  if (!meetCodeOf(url)) return;
-  const tab = await chrome.tabs.create({ url, active: true });
+  const code = meetCodeOf(url);
+  if (!code) return;
+  try {
+    const open = (await chrome.tabs.query({ url: 'https://meet.google.com/*' })).find(t => meetCodeOf(t.url || t.pendingUrl) === code);
+    if (open) {
+      await chrome.tabs.update(open.id, { active: true });
+      await chrome.windows.update(open.windowId, { focused: true }).catch(() => {});
+      await rememberMeetTab(url, open.id);
+      return;
+    }
+  } catch {}
+  const tab = await chrome.tabs.create({ url: `https://meet.google.com/${code}`, active: true });
   await rememberMeetTab(url, tab.id);
-}
-
-// If the helper can't create a Meet (e.g. they joined from the Mac app only), the asker makes one.
-function meetFallback(helpId) {
-  clearTimeout(meetFallbacks.get(helpId));
-  meetFallbacks.set(helpId, setTimeout(() => {
-    const h = client.state.helps[helpId];
-    if (h && h.claimedBy && !h.meetUrl) startMeet(url => client.shareMeet(helpId, url));
-  }, 15000));
 }
 
 async function openCall(callId, ring) {
@@ -469,21 +581,42 @@ function act(name, args = {}) {
       break;
     case 'call': {
       const callId = newId();
-      if (settings.callApp === 'meet') startMeet(url => client.invite(args.to, callId, url));
+      // ring them straight away; the Meet link follows (call:invited → whoever the server picks makes it)
+      if (settings.callApp === 'meet') { callState('out', callId, { to: args.to }); client.invite(args.to, callId, null, true); }
       else { client.invite(args.to, callId); openCall(callId, args.to); }
       break;
     }
     case 'call:join': {
+      // just woken up? wait for the connection so we know about the call before deciding
+      if (client.state.conn !== 'online') { online().then(() => act('call:join', args)); break; }
       // help call or huddle: use its Meet link when there is one
-      const url = args.url || client.state.helps[args.callId]?.meetUrl || client.snapshot().calls.find(c => c.callId === args.callId)?.url;
+      const h = client.state.helps[args.callId];
+      const url = args.url || h?.meetUrl || client.snapshot().calls.find(c => c.callId === args.callId)?.url;
       if (url) openMeet(url);
-      else if (settings.callApp === 'meet' && client.state.helps[args.callId]) { /* link is on its way */ }
-      else openCall(args.callId);
+      else if (h && settings.callApp === 'meet') {
+        // no link yet: if I'm the one making it, bring that tab up (or start it); otherwise it's on its way
+        if (h.host === client.state.me?.id) startMeet('help', h.id);
+        else if (Date.now() - (askedAgain[h.id] || 0) < 60000) {
+          // second tap: stop waiting for the other person's link and make the meeting here
+          client.rehost(h.id);
+          uiToast('Starting the meeting here…');
+        } else {
+          askedAgain[h.id] = Date.now();
+          client.nudge(h.id);   // ask the other person's browser to send the link again
+          uiToast('The meeting link is on its way… Tap Open call again to start it yourself.');
+        }
+      } else openCall(args.callId);
       break;
     }
     case 'call:accept':
       chrome.notifications.clear(`invite:${args.callId}:${args.from}`);
-      if (args.url) openMeet(args.url); else openCall(args.callId);
+      (async () => {
+        const c = (await session('calls'))[args.callId];
+        if (!c && !args.url) return openCall(args.callId);       // built-in audio call
+        await callState('accept', args.callId);
+        if (args.url || c?.url) openMeet(args.url || c.url);
+        client.acceptCall(args.callId);                         // → call:url: the link, or "you make it"
+      })();
       break;
     case 'call:decline':
       chrome.notifications.clear(`invite:${args.callId}:${args.from}`);
@@ -507,7 +640,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     await init();
     if (msg.type === 'action') { act(msg.name, msg.args); reply({ ok: true }); }
     else if (msg.type === 'gchat:status') { applyChatStatus(msg); reply({ ok: true }); }
-    else if (msg.type === 'meet:open') { if (sender.tab) await rememberMeetTab(msg.url, sender.tab.id); reply({ ok: true }); }
+    else if (msg.type === 'meet:open') {
+      if (sender.tab) { await finishMaking(sender.tab.id, msg.url); await rememberMeetTab(msg.url, sender.tab.id); }
+      reply({ ok: true });
+    }
     else if (msg.type === 'meet:left') { if (sender.tab) await forgetMeetTab(sender.tab.id); await leftMeet(msg.url); reply({ ok: true }); }
     else if (msg.type === 'settings:save') {
       const next = { ...settings, ...msg.settings };

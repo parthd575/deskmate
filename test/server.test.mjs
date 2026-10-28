@@ -222,3 +222,49 @@ test('next stand-up time respects the team time zone and days', async () => {
   assert.equal(new Date(nextStandup(cfg, Date.UTC(2026, 9, 23, 13))).toISOString(), '2026-10-26T09:30:00.000Z');
   assert.equal(nextStandup({ ...cfg, enabled: false }), null);
 });
+
+test('direct Google Meet call: rings at once, one host, same link for both, ends for both', async () => {
+  const a = await client('t13', 'a@x.com');            // caller (Chrome extension = role main)
+  const b = await client('t13', 'b@x.com');
+  send(a, { type: 'call:invite', to: 'b@x.com', callId: 'c1', meet: true });
+  await wait(80);
+  const inv = last(b, 'call:invite');
+  assert.equal(inv.from, 'a@x.com');
+  assert.equal(inv.host, 'a@x.com');                    // caller makes the meeting
+  assert.equal(last(a, 'call:invited').host, 'a@x.com');
+  send(b, { type: 'call:accept', callId: 'c1' });       // tapped Join before the link exists
+  await wait(80);
+  assert.equal(last(b, 'call:url').url, null);
+  assert.equal(last(a, 'call:accepted').by, 'b@x.com');
+  send(a, { type: 'call:url', callId: 'c1', url: 'https://meet.google.com/abc-defg-hij' });
+  send(a, { type: 'call:url', callId: 'c1', url: 'https://meet.google.com/zzz-zzzz-zzz' });   // a 2nd one is ignored
+  await wait(80);
+  const u = last(b, 'call:url');
+  assert.equal(u.url, 'https://meet.google.com/abc-defg-hij');
+  assert.equal(u.accepted, true);
+  assert.ok(last(b, 'calls').calls.some(c => c.callId === 'c1' && c.url === u.url));
+  send(b, { type: 'help:end', url: u.url });            // B leaves the Meet
+  await wait(80);
+  assert.equal(last(a, 'call:ended').url, u.url);
+  assert.equal(last(b, 'call:ended').reason, 'ended');
+  [a, b].forEach(w => w.close());
+});
+
+test('tapping Join twice on a help request does not start a second meeting', async () => {
+  const a = await client('t14', 'a@x.com');
+  const b = await client('t14', 'b@x.com');
+  send(a, { type: 'help', topic: 'x' });
+  await wait(80);
+  const id = last(b, 'help:new').help.id;
+  send(b, { type: 'help:claim', id });
+  await wait(60);
+  send(b, { type: 'help:meet', id, url: 'https://meet.google.com/abc-defg-hij' });
+  await wait(60);
+  const claims = () => b.log.filter(m => m.type === 'help:claimed').length;
+  const before = claims();
+  send(b, { type: 'help:claim', id });
+  await wait(80);
+  assert.equal(claims(), before);                        // no new "claimed" (which would start a Meet)
+  assert.equal(last(b, 'help:meet').again, true);        // just the existing link again
+  [a, b].forEach(w => w.close());
+});

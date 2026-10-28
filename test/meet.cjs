@@ -73,6 +73,13 @@ async function person(name) {
   check(!bob.ctx.pages().concat(alice.ctx.pages()).some(p => p.url().includes('/call/call.html')), 'No WebRTC call window opened');
   const box = await alice.page.textContent('#helpBox');
   check(/Google Meet/.test(box), `Alice’s panel says Google Meet ("${box.trim().replace(/\s+/g, ' ').slice(0, 60)}")`);
+  // "Open call" (twice) goes back to the same meeting: no second meeting, no duplicate tab
+  await alice.page.click('#openCall');
+  await wait(800);
+  await alice.page.click('#openCall');
+  await wait(1200);
+  const aTabsAfter = await meetTabs(alice);
+  check(aTabsAfter.length === 1 && aTabsAfter[0].startsWith('https://meet.google.com/abc-defg-hia'), `Open call reuses the same meeting (${aTabsAfter.join(', ')})`);
   await bob.page.bringToFront();
   await bob.page.click('#feed [data-end]');
   await endedForBoth('End call');
@@ -94,6 +101,79 @@ async function person(name) {
   check(await stopWorker(bob), '[Leave call] stopped Bob’s service worker mid-call');
   await tab2.click('#hangup');
   await endedForBoth('Leave call');
+
+  // 6) Google got Bob to the meeting before his browser noted the tab down (missed event):
+  //    Alice taps Open call once → Bob's browser is nudged → it shares the link → Alice joins
+  await web.bringToFront();
+  await alice.page.fill('#askInput', 'Missed event'); await alice.page.click('#askForm button[type=submit]');
+  await web.waitForSelector('iframe[title=Deskmate]', { timeout: 8000 });
+  await wait(800);
+  await web.frames().find(f => f.url().includes('/bubble/bubble.html')).click('.acts .primary');
+  const t3 = Date.now(); let bobTab6;
+  while (!(bobTab6 = bob.ctx.pages().find(p => /meet\.google\.com\/new|chrome-error/.test(p.url()))) && Date.now() - t3 < 10000) await wait(200);
+  // hide the job, let the tab reach the meeting, then put the job back (= the race)
+  const job = await bob.page.evaluate(async () => { const m = (await chrome.storage.session.get('making')).making || {}; await chrome.storage.session.set({ making: {} }); return m; });
+  await bobTab6.goto('https://meet.google.com/abc-defg-hif?authuser=0').catch(() => {});
+  await wait(1500);
+  await bob.page.evaluate(async (m) => { await chrome.storage.session.set({ making: m }); }, job);
+  check((await meetTabs(alice)).length === 0, 'Alice has no link yet (the share was missed)');
+  await alice.page.bringToFront();
+  await alice.page.click('#openCall');
+  await wait(3000);
+  const a6 = await meetTabs(alice);
+  check(a6.length === 1 && a6[0].startsWith('https://meet.google.com/abc-defg-hif'), `One tap on Open call fetches the link Bob is already in (${a6.join(', ') || 'none'})`);
+  await alice.page.click('#helpBox #endCall');
+  await endedForBoth('Missed event');
+
+  // 5) Bob's browser never finishes making the Meet (e.g. stuck on Google's sign-in):
+  //    Alice taps Open call twice → her browser makes it → Bob is sent the same link
+  await web.bringToFront();
+  await alice.page.fill('#askInput', 'Stuck maker'); await alice.page.click('#askForm button[type=submit]');
+  await web.waitForSelector('iframe[title=Deskmate]', { timeout: 8000 });
+  await wait(800);
+  await web.frames().find(f => f.url().includes('/bubble/bubble.html')).click('.acts .primary');
+  await wait(2000);   // Bob's tab sits on meet.google.com/new
+  await alice.page.bringToFront();
+  await alice.page.click('#openCall');
+  await wait(600);
+  await alice.page.click('#openCall');
+  const t2 = Date.now(); let aliceMaking;
+  while (!(aliceMaking = alice.ctx.pages().find(p => /meet\.google\.com\/new|chrome-error/.test(p.url()))) && Date.now() - t2 < 10000) await wait(200);
+  check(!!aliceMaking, 'Second tap on Open call starts the meeting in Alice’s browser');
+  if (aliceMaking) await aliceMaking.goto('https://meet.google.com/abc-defg-hie?authuser=0').catch(() => {});
+  await wait(3000);
+  const bRe = await meetTabs(bob);
+  check(bRe.length === 1 && bRe[0].startsWith('https://meet.google.com/abc-defg-hie'), `Bob gets Alice’s link and his stuck tab is closed (${bRe.join(', ') || 'none'})`);
+  await alice.page.click('#helpBox #endCall');
+  await endedForBoth('Rehost');
+
+  // 4) Direct call: Bob calls Alice → she's rung at once → same meeting for both
+  const aliceWeb = await alice.ctx.newPage(); await aliceWeb.goto(WEB + '/'); await aliceWeb.bringToFront();
+  await bob.page.bringToFront();
+  await bob.page.evaluate(() => document.querySelector('#people li[data-id="alice@x.com"] [data-call]').click());
+  await aliceWeb.waitForSelector('iframe[title=Deskmate]', { timeout: 8000 }).catch(() => {});
+  await wait(1200);
+  const ring = aliceWeb.frames().find(f => f.url().includes('/bubble/bubble.html'));
+  await ring?.waitForFunction(() => document.querySelector('#title')?.textContent, null, { timeout: 8000 }).catch(() => {});
+  const ringText = ring ? await ring.textContent('#title') : '';
+  check(/Bob is calling you/.test(ringText), `Alice is rung straight away ("${ringText.replace(/\s+/g, ' ').trim().slice(0, 50)}")`);
+  const sound = await alice.page.evaluate(async () => (await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })).length);
+  check(sound > 0, 'A ring sound played for Alice');
+  const t1 = Date.now(); let bobCallTab;
+  while (!(bobCallTab = bob.ctx.pages().find(p => /meet\.google\.com\/new|chrome-error/.test(p.url()))) && Date.now() - t1 < 10000) await wait(200);
+  check(!!bobCallTab, 'Bob’s browser is making the meeting');
+  if (bobCallTab) await bobCallTab.goto('https://meet.google.com/abc-defg-hid?authuser=0').catch(() => {});
+  await wait(1500);
+  await ring?.click('.acts .primary').catch(() => {});
+  await wait(2500);
+  const aCall = await meetTabs(alice), bCall = await meetTabs(bob);
+  check(aCall.length === 1 && aCall[0].startsWith('https://meet.google.com/abc-defg-hid') && bCall.length === 1, `Same meeting for both (Alice: ${aCall.join(', ') || 'none'} · Bob: ${bCall.join(', ') || 'none'})`);
+  await aliceWeb.close();
+  // Alice hangs up by closing her Meet tab → Bob's closes too
+  const aTab = alice.ctx.pages().find(isMeet('abc-defg-hid'));
+  if (aTab) await aTab.close(); else await alice.page.evaluate(async () => { for (const t of await chrome.tabs.query({ url: 'https://meet.google.com/*' })) await chrome.tabs.remove(t.id); });
+  await wait(2500);
+  check((await meetTabs(bob)).length === 0, 'Closing the Meet ends the direct call for both');
 
   // 3) Bob just closes his Meet tab (worker asleep)
   const tab3 = await round('abc-defg-hic', 'Close tab');

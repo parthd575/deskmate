@@ -4,7 +4,7 @@
 
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { Room, configFromEnv, newId, teamCode } from './room.js';
+import { Room, configFromEnv, newId, teamCode, PROTOCOL } from './room.js';
 
 const PORT = Number(process.env.PORT || 8787);
 const config = configFromEnv(process.env);
@@ -36,7 +36,7 @@ function schedule(room) {
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, teams: rooms.size, sockets: sockets.size }));
+    return res.end(JSON.stringify({ ok: true, protocol: PROTOCOL, teams: rooms.size, sockets: sockets.size }));
   }
   res.writeHead(200, { 'content-type': 'text/plain' });
   res.end('Deskmate server. Connect via WebSocket.');

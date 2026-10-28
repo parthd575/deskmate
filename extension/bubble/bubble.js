@@ -20,8 +20,8 @@ const KINDS = {
     pose: 'raise', ttl: 90, pulse: true,
   },
   invite: {
-    title: `${data.name} needs help`,
-    sub: 'Tap Join to hop on an audio call',
+    title: `${data.name} is calling you`,
+    sub: 'Tap Join to hop on the call',
     acts: [['primary', 'Join', () => { bridge.action('call:accept', { callId: data.id, from: data.from, url: data.url }); close(); }], ['ghost', 'Not now', () => { bridge.action('call:decline', { callId: data.id, from: data.from }); close(); }]],
     pose: 'raise', ttl: 45, pulse: true,
   },

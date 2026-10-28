@@ -66,6 +66,9 @@ const CLAIM_LINGER_MS = 60 * 1000;
 const MEET_TTL_MS = 3 * 60 * 60 * 1000;
 const SEAT_GC_MS = 60 * 60 * 1000;
 
+// bump when clients need a newer server (clients warn "server out of date")
+export const PROTOCOL = 3;
+
 export const newId = () => {
   const b = new Uint8Array(6);
   crypto.getRandomValues(b);
@@ -103,6 +106,7 @@ export class Room {
     this.team = { standup: null };   // team-wide settings
     this.standup = null;      // the stand-up happening right now
     this.kudosAt = {};        // "from>to" -> last time (in memory only)
+    this.direct = {};         // callId -> direct call { id, from, to, host, url, at }  (Google Meet calls)
     if (saved) this.#restore(saved);
   }
 
@@ -116,6 +120,7 @@ export class Room {
       stats: this.stats,
       team: this.team,
       standup: this.standup,
+      direct: this.direct,
     });
   }
 
@@ -128,6 +133,7 @@ export class Room {
     this.stats = s.stats || {};
     this.team = s.team || { standup: null };
     this.standup = s.standup || null;
+    this.direct = s.direct || {};
     // Sockets can be gone after a restart (e.g. a deploy): drop them, and give anyone left
     // without a connection the usual grace period to reconnect.
     for (const m of this.members.values()) {
@@ -177,6 +183,7 @@ export class Room {
       return this.#startStandup('schedule');
     }
     if (kind === 'standupTurn') return this.#nextTurn(a);
+    if (kind === 'direct') return this.#endDirect(a, 'expired');
     if (kind === 'gc') {
       const m = this.members.get(a);
       if (m && !m.online && m.sockets.size === 0) this.members.delete(a);
@@ -239,6 +246,10 @@ export class Room {
     for (const h of this.helps.values()) {
       if (h.meetUrl && h.claimedBy) calls.push({ callId: h.id, url: h.meetUrl, participants: [h.from, h.claimedBy] });
     }
+    // direct calls once someone has accepted and the Meet link exists
+    for (const c of Object.values(this.direct)) {
+      if (c.url && c.accepted) calls.push({ callId: c.id, url: c.url, participants: [c.from, c.to] });
+    }
     return calls;
   }
 
@@ -275,6 +286,27 @@ export class Room {
     this.helps.delete(helpId);
     this.#broadcast({ type: 'help:closed', id: helpId, reason }, { roles: ['main', 'companion'] });
     if (h.meetUrl) this.#announceCalls();
+  }
+
+  // ------------------------------------------------------------ Google Meet calls
+  // Exactly one person creates the Meet (opens meet.google.com/new in Chrome): the first of
+  // `prefer` who has the Chrome extension connected. Everyone else opens that same link.
+  #host(...prefer) {
+    for (const id of prefer) {
+      const m = this.members.get(id);
+      if (m && [...m.sockets].some(sid => this.sockets.get(sid)?.meta.role === 'main')) return id;
+    }
+    return prefer[0];
+  }
+  #endDirect(id, reason, byName) {
+    const c = this.direct[id];
+    if (!c) return;
+    delete this.direct[id];
+    this.#clear(`direct:${id}`);
+    const msg = { type: 'call:ended', callId: id, url: c.url || null, reason, byName: byName || null };
+    this.#toUser(c.from, msg);
+    this.#toUser(c.to, msg);
+    if (c.url && c.accepted) this.#announceCalls();
   }
 
   // ------------------------------------------------------------ plants
@@ -392,6 +424,7 @@ export class Room {
         iceServers: this.cfg.ICE_SERVERS,
         teamCfg: this.team,
         standup: this.standup,
+        protocol: PROTOCOL,
       });
       if (meta.role !== 'call') {
         this.#broadcast({ type: 'presence', member: this.#public(m) }, { exceptSocket: meta.socketId });
@@ -448,11 +481,17 @@ export class Room {
         if (!h) return this.#send(conn, { type: 'help:gone', id: msg.id });
         if (h.claimedBy && h.claimedBy !== me.id) return this.#send(conn, { type: 'help:taken', id: h.id, by: h.claimedBy });
         if (h.from === me.id) return;
+        if (h.claimedBy === me.id) {
+          // tapped Join again: don't start a second meeting, just point them at the one there is
+          if (h.meetUrl) this.#send(conn, { type: 'help:meet', id: h.id, url: h.meetUrl, by: h.host, again: true });
+          return;
+        }
         h.claimedBy = me.id;
         h.claimedName = me.name;
-        // keep the request around briefly so late viewers see "X is on it", then close
-        this.#timer(`help:${h.id}`, CLAIM_LINGER_MS, 'help', { id: h.id, reason: 'claimed' });
-        this.#broadcast({ type: 'help:claimed', id: h.id, by: me.id, byName: me.name, bySocket: meta.socketId, callId: h.id }, { roles: ['main', 'companion'] });
+        h.host = this.#host(me.id, h.from);   // the helper makes the Meet (or the asker, if the helper has no Chrome extension)
+        // keep the request around while the Meet is being made, then close it if no link ever arrives
+        this.#timer(`help:${h.id}`, 5 * 60 * 1000, 'help', { id: h.id, reason: 'claimed' });
+        this.#broadcast({ type: 'help:claimed', id: h.id, by: me.id, byName: me.name, bySocket: meta.socketId, callId: h.id, host: h.host }, { roles: ['main', 'companion'] });
         this.#grow(me.id, 'helped', 'help', h.from);   // helping someone grows your plant
         return;
       }
@@ -469,12 +508,33 @@ export class Room {
         return;
       }
 
+      case 'help:nudge': {
+        // "where's the link?": ask whoever is making the Meet to send it again
+        const h = this.helps.get(msg.id);
+        if (!h || (h.from !== me.id && h.claimedBy !== me.id)) return;
+        if (h.meetUrl) return this.#send(conn, { type: 'help:meet', id: h.id, url: h.meetUrl, by: h.host, again: true });
+        return this.#toUser(h.host, { type: 'help:nudge', id: h.id, host: h.host });
+      }
+
+      case 'help:rehost': {
+        // the meeting maker never shared a link (e.g. stuck on Google's sign-in): the other person makes it
+        const h = this.helps.get(msg.id);
+        if (!h || h.meetUrl || !h.claimedBy || (h.from !== me.id && h.claimedBy !== me.id) || h.host === me.id) return;
+        h.host = me.id;
+        return this.#broadcast({ type: 'help:host', id: h.id, host: me.id }, { roles: ['main', 'companion'] });
+      }
+
       case 'help:end': {
         // asker or helper hangs up (by request id, or by its Meet link): close it for everyone in it
         const mineOrHelping = (h) => h && (h.from === me.id || h.claimedBy === me.id);
         const h = msg.id ? this.helps.get(msg.id)
           : typeof msg.url === 'string' ? [...this.helps.values()].find(x => x.meetUrl === msg.url && mineOrHelping(x)) : null;
-        if (!mineOrHelping(h)) return;
+        if (!mineOrHelping(h)) {
+          // not a help request: maybe a direct call (by id or Meet link)
+          const c = Object.values(this.direct).find(x => (x.id === msg.id || (x.url && x.url === msg.url)) && (x.from === me.id || x.to === me.id));
+          if (c) this.#endDirect(c.id, 'ended', me.name);
+          return;
+        }
         for (const sid of this.calls.get(h.id) || []) this.#send(this.sockets.get(sid), { type: 'call:end', callId: h.id, byName: me.name });
         this.#closeHelp(h.id, 'ended');
         return;
@@ -494,12 +554,50 @@ export class Room {
         const to = clean(msg.to, 64);
         const callId = clean(msg.callId, 32) || newId();
         const meetUrl = MEET_RE.test(clean(msg.url, 80)) ? clean(msg.url, 80) : null;
-        this.#toUser(to, { type: 'call:invite', callId, url: meetUrl, from: me.id, fromName: me.name, color: me.color, avatar: me.avatar });
-        return this.#send(conn, { type: 'call:invited', callId, to });
+        if (!this.members.get(to)) return;
+        // Google Meet calls are remembered so both people end up in the same meeting; the
+        // invite goes out straight away (ringing) and the link follows as soon as it exists
+        let host = null;
+        if (msg.meet) {
+          host = this.#host(me.id, to);
+          this.direct[callId] = { id: callId, from: me.id, to, host, url: meetUrl, at: now(), accepted: false };
+          this.#timer(`direct:${callId}`, 3 * 60 * 60 * 1000, 'direct', callId);
+        }
+        this.#toUser(to, { type: 'call:invite', callId, url: meetUrl, meet: !!msg.meet, host, from: me.id, fromName: me.name, color: me.color, avatar: me.avatar });
+        // all my devices hear about it (the Chrome extension makes the Meet even if I called from the Mac app)
+        return this.#toUser(me.id, { type: 'call:invited', callId, to, host });
       }
 
-      case 'call:decline':
-        return this.#toUser(clean(msg.to, 64), { type: 'call:declined', callId: clean(msg.callId, 32), by: me.id, byName: me.name }, { includeCall: true });
+      case 'call:url': {
+        // the host made the Meet: share the link with both people (only once)
+        const c = this.direct[clean(msg.callId, 32)];
+        const url = clean(msg.url, 80);
+        if (!c || c.url || !MEET_RE.test(url) || (c.from !== me.id && c.to !== me.id)) return;
+        c.url = url;
+        const out = { type: 'call:url', callId: c.id, url, by: me.id, host: c.host, accepted: c.accepted };
+        this.#toUser(c.from, out);
+        this.#toUser(c.to, out);
+        if (c.accepted) this.#announceCalls();
+        return;
+      }
+
+      case 'call:accept': {
+        const c = this.direct[clean(msg.callId, 32)];
+        if (!c || c.to !== me.id) return;
+        if (!c.accepted) {
+          c.accepted = true;
+          this.#toUser(c.from, { type: 'call:accepted', callId: c.id, by: me.id, byName: me.name });
+          if (c.url) this.#announceCalls();
+        }
+        // tell all their devices which link to open (or that it's on its way / that they make it)
+        return this.#toUser(me.id, { type: 'call:url', callId: c.id, url: c.url || null, host: c.host, by: null, accepted: true });
+      }
+
+      case 'call:decline': {
+        const id = clean(msg.callId, 32);
+        if (this.direct[id]?.to === me.id) this.#endDirect(id, 'declined', me.name);
+        return this.#toUser(clean(msg.to, 64), { type: 'call:declined', callId: id, by: me.id, byName: me.name }, { includeCall: true });
+      }
 
       case 'call:join': {
         const callId = clean(msg.callId, 32);

@@ -185,7 +185,19 @@ function onEvent(e, snap) {
       showBubble({ kind: 'wave', id: newId(), from: e.from, name: e.fromName, emoji: e.emoji, color: snap.members.find(m => m.id === e.from)?.color, avatar: snap.members.find(m => m.id === e.from)?.avatar });
       break;
     case 'call:invite':
+      if (e.meet) directCalls.set(e.callId, { dir: 'in', from: e.from, url: e.url || null });
       showBubble({ kind: 'invite', id: e.callId, url: e.url, from: e.from, name: e.fromName, color: e.color, avatar: e.avatar });
+      break;
+    case 'call:url': {
+      // a direct call's Meet link: the Chrome extension opens it; without one, open it here
+      const c = directCalls.get(e.callId);
+      if (c && e.url) c.url = e.url;
+      if (e.url && e.by !== me?.id && !me?.ext && (c?.dir === 'out' || e.accepted)) openMeet(e.url);
+      break;
+    }
+    case 'call:ended':
+      toBubbles({ type: 'bubble:close', id: e.callId });
+      directCalls.delete(e.callId);
       break;
     case 'kudos':
       if (e.toMe) showBubble({ kind: 'kudos', id: newId(), from: e.from, name: e.fromName, color: snap.members.find(m => m.id === e.from)?.color, avatar: snap.members.find(m => m.id === e.from)?.avatar });
@@ -195,6 +207,9 @@ function onEvent(e, snap) {
       break;
   }
 }
+
+// direct Google Meet calls this Mac knows about: callId -> { dir: 'in' | 'out', url, accepted }
+const directCalls = new Map();
 
 function openMeet(url) {
   if (/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(url || '')) shell.openExternal(url);
@@ -283,13 +298,26 @@ function act(name, args = {}) {
     case 'standup:next': client.standupNext(); break;
     case 'standup:end': client.standupEnd(); break;
     case 'open-desk': if (!panel.isVisible()) togglePanel(); break;
-    case 'call': { const callId = newId(); client.invite(args.to, callId); openCall(callId, args.to); break; }
+    case 'call': {
+      const callId = newId();
+      if (settings.callApp === 'meet') { directCalls.set(callId, { dir: 'out', to: args.to }); client.invite(args.to, callId, null, true); }
+      else { client.invite(args.to, callId); openCall(callId, args.to); }
+      break;
+    }
     case 'call:join': {
       const url = args.url || client.state.helps[args.callId]?.meetUrl || client.snapshot().calls.find(c => c.callId === args.callId)?.url;
       if (url) openMeet(url); else openCall(args.callId);
       break;
     }
-    case 'call:accept': if (args.url) openMeet(args.url); else openCall(args.callId); break;
+    case 'call:accept': {
+      const c = directCalls.get(args.callId);
+      if (!c) { if (args.url) openMeet(args.url); else openCall(args.callId); break; }
+      c.accepted = true;
+      const url = args.url || c.url;
+      if (url && !me?.ext) openMeet(url);
+      client.acceptCall(args.callId);   // the Chrome extension (if running) opens the link when it arrives
+      break;
+    }
     case 'call:decline': client.decline(args.from, args.callId); break;
   }
 }

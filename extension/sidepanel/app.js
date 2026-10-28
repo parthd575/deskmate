@@ -31,6 +31,8 @@ queueMicrotask(() => bridge.onState((s) => {
 
 bridge.onEvent((e) => {
   if (e.type === 'react') scene?.react(e.from, e.emoji);
+  if (e.type === 'toast') toast(e.text);
+  if (e.type === 'call:ended' && e.reason === 'declined' && e.byName) toast(`${e.byName} can't talk right now`);
   if (e.type === 'wave') { scene?.wave(e.from); scene?.react(e.from, e.emoji || '👋'); toast(`${e.fromName} waved at you ${e.emoji || '👋'}`); }
   if (e.type === 'help:taken') toast('Someone else already picked that up');
   if (e.type === 'help:gone') toast('That request was closed');
@@ -83,6 +85,7 @@ function render() {
     setup: 'Set up needed',
   }[s.conn] || 'Connecting…';
 
+  $('#serverWarn').hidden = !s.serverOutdated;
   scene?.update(s);
   renderQuick(me);
   renderHelp(s);
