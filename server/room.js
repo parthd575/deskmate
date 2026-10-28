@@ -609,7 +609,7 @@ export class Room {
         const peers = [...set].map(sid => {
           const p = this.sockets.get(sid);
           const pm = p && this.members.get(p.meta.userId);
-          return pm && { peerId: sid, user: this.#public(pm) };
+          return pm && { peerId: sid, user: this.#public(pm), state: p.meta.callState || null };
         }).filter(Boolean);
         set.add(meta.socketId);
         meta.callId = callId;
@@ -630,6 +630,24 @@ export class Room {
         if (!meta.callId) return;
         for (const sid of this.calls.get(meta.callId) || []) if (sid !== meta.socketId) this.#send(this.sockets.get(sid), { type: 'call:mute', peerId: meta.socketId, muted: !!msg.muted });
         return;
+
+      case 'call:state': {
+        // mic / camera / screen share / raised hand, so the others can show it on my tile
+        if (!meta.callId) return;
+        const st = msg.state || {};
+        const state = { muted: !!st.muted, cam: !!st.cam, screen: !!st.screen, hand: !!st.hand };
+        meta.callState = state;
+        conn.save?.();
+        for (const sid of this.calls.get(meta.callId) || []) if (sid !== meta.socketId) this.#send(this.sockets.get(sid), { type: 'call:state', peerId: meta.socketId, state });
+        return;
+      }
+
+      case 'call:react': {
+        if (!meta.callId) return;
+        const emoji = clean(msg.emoji, 8);
+        for (const sid of this.calls.get(meta.callId) || []) this.#send(this.sockets.get(sid), { type: 'call:react', peerId: meta.socketId, emoji });
+        return;
+      }
 
       case 'call:leave':
         return this.#leaveCall(conn);

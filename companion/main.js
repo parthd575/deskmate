@@ -2,7 +2,7 @@
 // Lives in the menu bar, keeps you on the team desk even when Chrome is closed,
 // and floats help/call bubbles over every app.
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, protocol, net, screen, dialog,
-  powerMonitor, globalShortcut, session, systemPreferences, shell } from 'electron';
+  powerMonitor, globalShortcut, session, systemPreferences, shell, desktopCapturer } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -20,7 +20,7 @@ const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
 const DEFAULTS = {
   server: DEFAULT_SERVER, team: '', name: '', email: '', color: '#6C8CFF',
   avatar: { skin: '#F5D0B5', hair: '#2B2118', style: 'short' },
-  idleMinutes: 5, lunchMinutes: 45, gchat: false, bubbles: true, sound: true, autoBack: true, callApp: 'meet', launchAtLogin: true,
+  idleMinutes: 5, lunchMinutes: 45, gchat: false, bubbles: true, sound: true, autoBack: true, launchAtLogin: true,
 };
 
 let settings, client, tray, panel, callWin = null;
@@ -114,8 +114,10 @@ function toBubbles(msg) {
 }
 
 async function openCall(callId, ring) {
-  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
-    await systemPreferences.askForMediaAccess('microphone');
+  if (process.platform === 'darwin') {
+    for (const kind of ['microphone', 'camera']) {
+      if (systemPreferences.getMediaAccessStatus(kind) !== 'granted') await systemPreferences.askForMediaAccess(kind).catch(() => {});
+    }
   }
   const url = `app://deskmate/call/call.html?id=${encodeURIComponent(callId)}${ring ? `&ring=${encodeURIComponent(ring)}` : ''}`;
   if (callWin && !callWin.isDestroyed()) {
@@ -124,12 +126,12 @@ async function openCall(callId, ring) {
     return;
   }
   const wa = screen.getPrimaryDisplay().workArea;
+  const W = Math.min(1000, wa.width - 40), H = Math.min(680, wa.height - 40);
   callWin = new BrowserWindow({
-    width: 360, height: 500, x: wa.x + wa.width - 376, y: wa.y + 40, title: 'Huddle',
-    titleBarStyle: 'hiddenInset', alwaysOnTop: true, minimizable: true, resizable: true, minWidth: 300, minHeight: 380,
+    width: W, height: H, x: wa.x + Math.round((wa.width - W) / 2), y: wa.y + 30, title: 'Deskmate call',
+    backgroundColor: '#202124', minimizable: true, resizable: true, minWidth: 520, minHeight: 400,
     webPreferences,
   });
-  callWin.setAlwaysOnTop(true, 'floating');
   callWin.loadURL(url);
   callWin.on('closed', () => { callWin = null; });
 }
@@ -170,12 +172,8 @@ function onEvent(e, snap) {
       break;
     case 'help:claimed':
       toBubbles({ type: 'bubble:update', id: e.id, claimedName: e.byName, byMe: e.byMe });
-      // Google Meet calls are created and opened by the Chrome extension; the Mac app only
-      // opens the link itself for people who don't have the extension running
-      if (settings.callApp !== 'meet' && (e.byThisDevice || e.mine)) openCall(e.callId);
-      break;
-    case 'help:meet':
-      if ((e.mine || e.helping) && !e.byMe && !me?.ext) openMeet(e.url);
+      // both people join the same call room (its id is the help request's id)
+      if (e.byThisDevice || e.mine) openCall(e.callId);
       break;
     case 'help:closed':
       toBubbles({ type: 'bubble:close', id: e.id });
@@ -185,19 +183,7 @@ function onEvent(e, snap) {
       showBubble({ kind: 'wave', id: newId(), from: e.from, name: e.fromName, emoji: e.emoji, color: snap.members.find(m => m.id === e.from)?.color, avatar: snap.members.find(m => m.id === e.from)?.avatar });
       break;
     case 'call:invite':
-      if (e.meet) directCalls.set(e.callId, { dir: 'in', from: e.from, url: e.url || null });
       showBubble({ kind: 'invite', id: e.callId, url: e.url, from: e.from, name: e.fromName, color: e.color, avatar: e.avatar });
-      break;
-    case 'call:url': {
-      // a direct call's Meet link: the Chrome extension opens it; without one, open it here
-      const c = directCalls.get(e.callId);
-      if (c && e.url) c.url = e.url;
-      if (e.url && e.by !== me?.id && !me?.ext && (c?.dir === 'out' || e.accepted)) openMeet(e.url);
-      break;
-    }
-    case 'call:ended':
-      toBubbles({ type: 'bubble:close', id: e.callId });
-      directCalls.delete(e.callId);
       break;
     case 'kudos':
       if (e.toMe) showBubble({ kind: 'kudos', id: newId(), from: e.from, name: e.fromName, color: snap.members.find(m => m.id === e.from)?.color, avatar: snap.members.find(m => m.id === e.from)?.avatar });
@@ -206,13 +192,6 @@ function onEvent(e, snap) {
       if (e.started && e.inIt) showBubble({ kind: 'standup', id: 'standup-' + e.standup.id, name: '', color: me?.color, avatar: me?.avatar });
       break;
   }
-}
-
-// direct Google Meet calls this Mac knows about: callId -> { dir: 'in' | 'out', url, accepted }
-const directCalls = new Map();
-
-function openMeet(url) {
-  if (/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(url || '')) shell.openExternal(url);
 }
 
 function trayImage(name) {
@@ -298,26 +277,9 @@ function act(name, args = {}) {
     case 'standup:next': client.standupNext(); break;
     case 'standup:end': client.standupEnd(); break;
     case 'open-desk': if (!panel.isVisible()) togglePanel(); break;
-    case 'call': {
-      const callId = newId();
-      if (settings.callApp === 'meet') { directCalls.set(callId, { dir: 'out', to: args.to }); client.invite(args.to, callId, null, true); }
-      else { client.invite(args.to, callId); openCall(callId, args.to); }
-      break;
-    }
-    case 'call:join': {
-      const url = args.url || client.state.helps[args.callId]?.meetUrl || client.snapshot().calls.find(c => c.callId === args.callId)?.url;
-      if (url) openMeet(url); else openCall(args.callId);
-      break;
-    }
-    case 'call:accept': {
-      const c = directCalls.get(args.callId);
-      if (!c) { if (args.url) openMeet(args.url); else openCall(args.callId); break; }
-      c.accepted = true;
-      const url = args.url || c.url;
-      if (url && !me?.ext) openMeet(url);
-      client.acceptCall(args.callId);   // the Chrome extension (if running) opens the link when it arrives
-      break;
-    }
+    case 'call': { const callId = newId(); client.invite(args.to, callId); openCall(callId, args.to); break; }
+    case 'call:join': openCall(args.callId); break;
+    case 'call:accept': openCall(args.callId); break;
     case 'call:decline': client.decline(args.from, args.callId); break;
   }
 }
@@ -422,8 +384,15 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(file).toString());
   });
 
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-sanitized-write'));
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media' || permission === 'clipboard-sanitized-write');
+  const ALLOWED = ['media', 'display-capture', 'clipboard-sanitized-write'];
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(ALLOWED.includes(permission)));
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED.includes(permission));
+  // screen sharing in calls: macOS's own picker where available, otherwise the whole main screen
+  session.defaultSession.setDisplayMediaRequestHandler((_req, cb) => {
+    desktopCapturer.getSources({ types: ['screen', 'window'] })
+      .then(sources => cb({ video: sources[0] }))
+      .catch(() => cb({}));
+  }, { useSystemPicker: true });
 
   loadSettings();
   applyLoginItem();

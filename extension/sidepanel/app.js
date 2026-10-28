@@ -208,7 +208,7 @@ function renderHelp(s) {
     box.innerHTML = `
       <div class="waiting claimed">
         <div class="spin"></div>
-        <div class="txt"><b>${esc(mine.claimedName || 'A teammate')} is joining you</b><span class="muted small">${mine.meetUrl ? 'On Google Meet' : state.settings?.callApp === 'builtin' ? 'Your call window is open' : 'Setting up Google Meet…'}</span></div>
+        <div class="txt"><b>${esc(mine.claimedName || 'A teammate')} is joining you</b><span class="muted small">Your call window is open</span></div>
         <div class="acts-row"><button class="btn" id="openCall">Open call</button><button class="btn end" id="endCall">End call</button></div>
       </div>`;
     $('#openCall').onclick = () => bridge.action('call:join', { callId: mine.id });
@@ -226,7 +226,7 @@ function renderFeed(s) {
     const age = since(h.ts);
     if (h.claimedBy && me && h.claimedBy === me.id) {
       items.push(`<div class="req"><div class="av" style="--c:${h.color}">${initials(h.fromName)}</div>
-        <div class="txt"><b>You’re helping ${esc(h.fromName.split(' ')[0])}</b><span>${esc(h.topic || (h.meetUrl ? 'Google Meet' : 'Audio huddle'))}</span></div>
+        <div class="txt"><b>You’re helping ${esc(h.fromName.split(' ')[0])}</b><span>${esc(h.topic || 'Video call')}</span></div>
         <div class="acts-row"><button class="btn" data-join="${h.id}">Open call</button><button class="btn end" data-end="${h.id}">End call</button></div></div>`);
     } else if (h.claimedBy) {
       items.push(`<div class="req"><div class="av" style="--c:${h.color}">${initials(h.fromName)}</div>
@@ -376,13 +376,11 @@ async function showSetup(firstRun) {
     bubbles: cur.bubbles !== false,
     sound: cur.sound !== false,
     autoBack: cur.autoBack !== false,
-    callApp: cur.callApp || 'meet',
     weatherPlace: cur.weatherPlace || '',
   };
   const f = $('#setupForm');
   for (const k of ['name', 'email', 'team', 'server', 'idleMinutes', 'lunchMinutes']) f.elements[k].value = draft[k];
   for (const k of ['gchat', 'bubbles', 'sound', 'autoBack']) f.elements[k].checked = draft[k];
-  f.elements.callApp.value = draft.callApp;
   f.elements.weatherPlace.value = draft.weatherPlace;
   // desk pet
   const petRow = $('#petRow');
@@ -502,7 +500,6 @@ $('#setupForm').addEventListener('submit', async (e) => {
     bubbles: f.elements.bubbles.checked,
     sound: f.elements.sound.checked,
     autoBack: f.elements.autoBack.checked,
-    callApp: f.elements.callApp.value,
     weatherPlace: f.elements.weatherPlace.value.trim(),
     tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
   };

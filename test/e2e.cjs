@@ -42,8 +42,6 @@ async function setup(u, color, lite = false) {
   await page.fill('input[name=team]', TEAM);
   await page.evaluate(() => { document.querySelector('#advanced').open = true; });
   await page.fill('input[name=server]', SERVER);
-  // this test exercises the built-in WebRTC call; Google Meet is covered by server.test.mjs
-  await page.selectOption('select[name=callApp]', 'builtin');
   // pick a character (the first N differ per person)
   const chars = await page.$$('#charGrid button');
   if (chars.length) await chars[['#EC4899', '#14B8A6', '#F59E0B'].indexOf(color) % chars.length].click();
@@ -110,11 +108,32 @@ async function setup(u, color, lite = false) {
   const [aCall, bCall] = await Promise.all([aCallP, bCallP]);
   check(!!aCall && !!bCall, 'Call windows opened for both Alice (asker) and Bob (helper)');
   for (const p of [aCall, bCall]) p.on('pageerror', e => console.log('[call pageerror]', e.message));
-  await bCall.waitForFunction(() => /2 people/.test(document.querySelector('#sub')?.textContent || ''), null, { timeout: 45000 })
-    .then(() => check(true, 'WebRTC audio connected (Bob’s call shows 2 people)'), async () => check(false, `WebRTC audio connected (Bob: "${await bCall.textContent('#sub')}", Alice: "${await aCall.textContent('#sub')}")`));
-  await bCall.setViewportSize({ width: 360, height: 500 });
+  const connected = () => !!globalThis.__call && [...globalThis.__call.peers.values()].some(p => p.pc.connectionState === 'connected');
+  await bCall.waitForFunction(connected, null, { timeout: 45000 })
+    .then(() => check(true, 'WebRTC call connected (same room for asker and helper)'), () => check(false, 'WebRTC call connected'));
+  check(await bCall.textContent('#count') === '2', 'Bob’s call shows 2 people');
+  // camera video from Alice reaches Bob
+  await bCall.waitForFunction(() => [...globalThis.__call.peers.values()].some(p => p.cam?.videoWidth > 0 && p.state.cam), null, { timeout: 20000 })
+    .then(() => check(true, 'Alice’s camera video plays in Bob’s call'), () => check(false, 'Alice’s camera video plays in Bob’s call'));
+  // Alice shares her screen (a stand-in canvas instead of the system picker)
+  await aCall.evaluate(() => {
+    navigator.mediaDevices.getDisplayMedia = async () => {
+      const c = Object.assign(document.createElement('canvas'), { width: 1280, height: 720 });
+      const g = c.getContext('2d');
+      setInterval(() => { g.fillStyle = `hsl(${Date.now() / 20 % 360} 70% 50%)`; g.fillRect(0, 0, 1280, 720); g.fillStyle = '#fff'; g.font = '80px sans-serif'; g.fillText('Alice’s screen', 380, 380); }, 100);
+      return c.captureStream(10);
+    };
+  });
+  await aCall.click('#share');
+  await bCall.waitForFunction(() => !document.querySelector('#stage').hidden && document.querySelector('#stageVideo').videoWidth > 0, null, { timeout: 20000 })
+    .then(() => check(true, 'Bob sees Alice presenting her screen'), async () => check(false, `Bob sees Alice presenting (${await bCall.textContent('#stageLabel')})`));
+  await bCall.setViewportSize({ width: 1000, height: 640 });
   await wait(1500);
   await bCall.screenshot({ path: `${OUT}/05-call-window.png` });
+  await aCall.click('#share');   // stop presenting
+  await bCall.waitForFunction(() => document.querySelector('#stage').hidden, null, { timeout: 10000 })
+    .then(() => check(true, 'Presenting stops for Bob too'), () => check(false, 'Presenting stops for Bob too'));
+  await bCall.screenshot({ path: `${OUT}/05b-call-grid.png` });
 
   // Everyone else sees Alice & Bob on a call
   await wait(800);

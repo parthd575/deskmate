@@ -1,14 +1,14 @@
 # Deskmate: your team's virtual desk
 
-Deskmate is a live 3D desk where everyone on your team sits together. You can see at a glance who's at their desk, who's at lunch, who's focusing and who's away. When you're stuck, one click asks the team for help. A teammate taps the pop-up and you're both in the same Google Meet within a few seconds.
+Deskmate is a live 3D desk where everyone on your team sits together. You can see at a glance who's at their desk, who's at lunch, who's focusing and who's away. When you're stuck, one click asks the team for help. A teammate taps the pop-up and you're both in a video call within a few seconds.
 
 It has three parts:
 
 | Part | What it does |
 |---|---|
-| **Chrome extension** (`extension/`) | Desk in Chrome's side panel, help pop-ups on whatever page you're on, Google Meet hand-off, auto-away. Runs on macOS, Windows, Linux and ChromeOS. |
+| **Chrome extension** (`extension/`) | Desk in Chrome's side panel, help pop-ups on whatever page you're on, the call window, auto-away. Runs on macOS, Windows, Linux and ChromeOS. |
 | **Mac menu-bar app** (`companion/`) | Icon and live count in the top menu bar, a one-click desk dropdown, help/call bubbles that float over **every** app (even full-screen), global shortcuts, and macOS Focus → Deskmate Focus. |
-| **Server** (`cloudflare/` or `server/`) | A small WebSocket service, hosted free on Cloudflare or as a Node process, for presence, help requests and sharing the Meet link (plus signalling for the optional built-in audio). It never sees or stores audio. |
+| **Server** (`cloudflare/` or `server/`) | A small WebSocket service, hosted free on Cloudflare or as a Node process, for presence, help requests and call signalling. It never sees or stores audio or video. |
 
 ![The six characters: Robo, Knight, Mage, Barbarian, Rogue and Hooded Rogue](docs/screenshots/characters.png)
 
@@ -76,16 +76,14 @@ node test/demo.cjs --live   # keeps 5 bots online in a team; set TEAM=<your code
 - Drag to look around, scroll to zoom, double-click to reset. Light and dark mode follow your system.
 - Click anyone to see their status, local time and note, with **Wave** and **Call** buttons.
 
-**Help → Google Meet in two clicks**
+**Help → video call in two clicks**
 
 - Type what you need, or nothing, and press **Ask for help** (or `⌥⇧H` from anywhere).
-- Teammates get a round bubble on the right of the screen: your character with its hand raised and "*{you}* needs help", with **Join** / **Not now**. (A system notification is only used if the bubble can't be shown.)
-- A soft three-note chime plays with the bubble (a two-tone ring for direct calls). Turn it off under **Settings → Advanced → Play a sound…**; Focus mode is always silent.
+- Teammates get a round bubble on the right of the screen: your character with its hand raised and "*{you}* needs help", plus a soft chime, with **Join** / **Not now**.
 - The first person to tap **Join** claims it. Everyone else's bubble changes to "Priya is on it ✓", so no one doubles up.
-- The helper's browser opens `meet.google.com/new` with their Google account. As soon as Meet gives the meeting its code, Deskmate shares the link and it **opens automatically for the person who asked**. If no link arrives within 15 seconds (say the helper joined from the Mac app only), the asker's browser creates the Meet instead.
-- Calling someone from their card works the same way: they get a bubble, tap **Join**, and land in your Meet.
-- To finish, either person can tap **End call** in the Deskmate panel, press Meet's own red **Leave call** button, or just close the Meet tab. Any of these closes the request and closes the Meet tab for the other person too, so nobody is left sitting in an empty meeting. Anyone can **Join** a call in progress from the desk.
-- Prefer no Google Meet? **Settings → Advanced → Calls open in → Built-in audio** switches back to peer-to-peer WebRTC audio (mute, speaking ring, up to 6 people).
+- Both of you land in the **same call room** (its id is the help request's id): Deskmate's own WebRTC call with **audio, video and screen sharing**, in a familiar video-call layout (people grid, presenter view, mute / camera / present / reactions / raise hand / leave, a People panel to add a teammate). **Open call** always brings you back to that room.
+- **Calling someone directly** (📞 on their card) rings them straight away with a pop-up and sound; when they tap Join you're in the same room.
+- Either person can tap **End call** in the panel to close the request and the call for both. Calls are peer-to-peer and encrypted (up to 6 people); nothing goes through Google or any other service.
 
 **Fewer interruptions**
 
@@ -130,7 +128,7 @@ Settings live in `cloudflare/wrangler.toml` under `[vars]`:
 |---|---|
 | `ALLOWED_DOMAIN` | Only accept people whose email ends with this domain, e.g. `elevationservices.co.uk` (recommended) |
 | `TEAM_CODES` | Comma-separated allow-list of team codes (empty = any) |
-| `ICE_SERVERS` | JSON list of STUN/TURN servers, only for *Built-in audio* calls |
+| `ICE_SERVERS` | JSON list of STUN/TURN servers for calls (add TURN for strict corporate networks) |
 
 In `cloudflare/`, `npm run logs` streams live logs and `npm run dev` runs the Cloudflare server locally on port 8787.
 
@@ -192,7 +190,7 @@ How it works: `extension/content/gchat.js` runs only on chat.google.com and mail
  │  • badge, notifications       │          │  • always-on-top bubbles     │
  │ side panel → 3D desk (three)  │          │ panel → same desk UI         │
  │ content script → page bubbles │          │ bubble/call → same pages     │
- │ Meet tab (or built-in audio)  │          │ opens Meet link / built-in   │
+ │ call window → WebRTC a/v/screen│          │ call window → same room      │
  └──────────────┬────────────────┘          └──────────────┬───────────────┘
                 │      presence / help / call signalling (wss)
                 └────────────────────┬──────────────────────┘
@@ -200,7 +198,7 @@ How it works: `extension/content/gchat.js` runs only on chat.google.com and mail
                      │ Cloudflare Worker           │  one Durable Object per team code
                      │ (or server/ on Node)        │  same room logic: server/room.js
                      └─────────────────────────────┘
-     calls happen in Google Meet; the server only passes the meet.google.com link along
+     calls are peer-to-peer WebRTC (DTLS-SRTP); the server only relays set-up messages
 ```
 
 The Mac app reuses the extension's UI files. `npm run sync` copies them in, and `preload.cjs` provides the same `deskBridge` interface, so there's one desk to maintain.
@@ -210,9 +208,8 @@ The Mac app reuses the extension's UI files. `npm run sync` copies them in, and 
 ## Privacy & security notes
 
 - The server keeps only the live room: who's online, their status and any open help requests. On Cloudflare it's saved in the team's Durable Object so it survives restarts, and it's deleted once everyone has left. The Node server keeps it in memory only.
-- Calls run in Google Meet under each person's own Google account. The server only passes the Meet link between the asker and the helper, and only accepts real `https://meet.google.com/xxx-xxxx-xxx` links.
-- With *Built-in audio*, calls are encrypted peer-to-peer WebRTC; the server only relays set-up messages between people in the same call.
-- The content script runs on web pages only to show the help bubble inside an isolated iframe. It never reads page content. The extension doesn't request the `tabs` permission; its only site permission is `meet.google.com`, used to read the new meeting's code and to notice when you leave the meeting (`content/meet.js` only looks for Meet's Leave call button).
+- Calls are end-to-end encrypted, peer-to-peer WebRTC (audio, video, screen). The server only relays connection set-up messages, and only between people in the same call.
+- The content script runs on web pages only to show the help bubble inside an isolated iframe. It never reads page content. The extension doesn't request the `tabs` permission or any site permissions.
 - **MVP trust model:** anyone who knows the team code and the server URL can join. Lock it down with `ALLOWED_DOMAIN` and `TEAM_CODES`, or add Google sign-in verification (roadmap item 1) before rolling it out widely.
 
 ---
@@ -226,11 +223,11 @@ npm test                  # protocol rules: status priority, help claims, Meet l
 npm run server &          # then, with the server running:
 npm run test:e2e          # 3 real Chrome profiles: statuses, help bubble, built-in call, End call, Focus mode
 SERVER=ws://localhost:8787 node --test test/server.test.mjs   # same protocol tests against a running server, e.g. npm run cf:dev
-npm run test:meet         # 2 profiles: Join → helper's Meet → same link opens for the asker → End call / Leave call / closing the tab ends it for both (meet.google.com is stubbed)
+npm run test:calls        # direct call rings + same room + video; Open call reuses the room
 npm run demo              # screenshots of a 6-person desk (light + dark) and the help bubble → test/shots
 ```
 
-The end-to-end test loads the real extension into three Chrome profiles. It checks that statuses sync, that the help bubble appears on an ordinary web page, that clicking **Join** connects both people (built-in audio), that Focus mode suppresses pop-ups, and that **End call** closes it for the other person. The Meet test checks the Google Meet hand-off end to end.
+The end-to-end test loads the real extension into three Chrome profiles. It checks that statuses sync, that the help bubble appears on an ordinary web page, that clicking **Join** connects both people in the same room with audio, video and screen sharing, that Focus mode suppresses pop-ups, and that **End call** closes it for the other person. The calls test checks direct calls (ringing, same room) and that Open call reuses the room.
 
 ---
 
@@ -238,25 +235,23 @@ The end-to-end test loads the real extension into three Chrome profiles. It chec
 
 1. **Google sign-in verification on the server**: verify a Google ID token on connect so identity can't be spoofed.
 2. **"Free in 12 min" hints** on the help button for people in a meeting.
-3. **Google Meet API**: create the Meet on the server with a Workspace service account so links are ready before anyone opens a browser.
-4. **Pods/zones**: several tables per team (Design, Dev, Support) with a walk-over to visit another pod.
-5. **Smart routing**: tag skills on people ("AWS", "Figma") and offer help requests to the right person first, then the whole team after 30 s.
-6. **Scheduled statuses**: "Lunch at 1:00 every weekday", working hours and time-zone shading on the desk.
-7. **Missed-help digest**: a gentle summary of requests you missed while in Focus.
-8. **Windows tray build** of the companion (the code is cross-platform. It needs a Windows icon and installer config).
+3. **Pods/zones**: several tables per team (Design, Dev, Support) with a walk-over to visit another pod.
+4. **Smart routing**: tag skills on people ("AWS", "Figma") and offer help requests to the right person first, then the whole team after 30 s.
+5. **Scheduled statuses**: "Lunch at 1:00 every weekday", working hours and time-zone shading on the desk.
+6. **Missed-help digest**: a gentle summary of requests you missed while in Focus.
+7. **Windows tray build** of the companion (the code is cross-platform. It needs a Windows icon and installer config).
 
 ## Project layout
 
 ```
 extension/   Chrome MV3 extension (load this folder unpacked)
-  background.js        service worker: connection, idle, Google Chat, badge, bubbles, Google Meet hand-off
+  background.js        service worker: connection, idle, Google Chat, badge, bubbles, call window
   lib/                 shared: client.js (protocol), characters.js + mixamo.js (rigged models), toon.js (springs), status.js, three.js
   models/              the six rigged .glb characters + manifest.json + CREDITS.md
   sidepanel/           the desk UI + setup/settings (also used by the Mac app)
   bubble/              animated help / call / wave pop-up
-  call/                built-in WebRTC audio window (when Built-in audio is chosen)
+  call/                the call window: WebRTC audio, video, screen sharing
   content/content.js   injects bubbles into the page you're viewing
-  content/meet.js      on meet.google.com: notices when you leave a Deskmate meeting
 companion/   Electron menu-bar app (macOS first); macfocus.js reads the Mac's Focus state
 server/      room.js (the room logic) + index.js, a Node WebSocket server (+ Dockerfile)
 cloudflare/  the same server on Cloudflare Workers + Durable Objects (free hosting)

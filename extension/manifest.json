@@ -3,7 +3,7 @@
   "name": "Deskmate \u2014 your team's virtual desk",
   "short_name": "Deskmate",
   "version": "0.1.0",
-  "description": "See who's at their desk, at lunch or away on a live 3D team desk. Ask for help and jump into an audio huddle in one click.",
+  "description": "See who's at their desk, at lunch or away on a live 3D team desk. Ask for help and jump into a video call in one click.",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",
@@ -36,9 +36,6 @@
     "identity.email",
     "offscreen"
   ],
-  "host_permissions": [
-    "https://meet.google.com/*"
-  ],
   "content_scripts": [
     {
       "matches": [
@@ -47,15 +44,6 @@
       ],
       "js": [
         "content/content.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://meet.google.com/*"
-      ],
-      "js": [
-        "content/meet.js"
       ],
       "run_at": "document_idle"
     },
