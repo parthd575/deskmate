@@ -62,7 +62,7 @@ node test/demo.cjs --live   # keeps 5 bots online in a team; set TEAM=<your code
 
 **The 3D desk**
 
-- **Desk pets:** pick a cat, dog, bunny, chick or fox in Settings. It sits on your desk, trots after you to lunch or the BRB corner, perks up when someone needs help, and curls up asleep while you're in Focus.
+- **Desk pets:** pick a cat, dog, chick, lion or tiger in Settings. It sits on your desk, trots after you to lunch or the BRB corner, perks up when someone needs help, and curls up asleep while you're in Focus.
 - **A plant that grows:** every time you help someone, or a teammate sends you **👏 kudos** (from your card on the desk), your desk plant grows: sprout → seedling → leafy → bud → flowers → full bloom → a little tree. Kudos are limited to one per teammate every 10 minutes.
 - **Weather and time of day:** the sky over the desk follows *your* clock (dawn, day, dusk, a starry night) and your local weather (sun, clouds, rain, snow, fog, storms with lightning), and the lighting changes with it. Everyone's card and team row shows their weather. The city comes from your time zone, or set one under **Settings → Advanced → Weather for the sky** (Open-Meteo, free, no key).
 - **Team stand-up:** set a time and days under **Settings → Team stand-up** (it applies to the whole team). At that time everyone who's here or focusing walks to a circle in front of the desks, a gong plays, and a spotlight + 🎤 passes from person to person with a countdown (**Next** / **End stand-up**). People who are away, at lunch, BRB, **on leave** or in another meeting are skipped; anyone who arrives late joins the end of the line. You can also start one any time.

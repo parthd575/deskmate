@@ -16,8 +16,8 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const BOTS = [
   { name: 'Priya Shah', color: '#EC4899', avatar: { model: 'knight', pet: 'cat' }, plant: 12, status: { state: 'desk' } },
   { name: 'Tom Becker', color: '#2F6FD6', avatar: { model: 'mage', pet: 'dog' }, plant: 4, status: { state: 'lunch', until: Date.now() + 25 * 60000 } },
-  { name: 'Aisha Khan', color: '#A78BFA', avatar: { model: 'barbarian', pet: 'fox' }, plant: 27, status: { state: 'dnd', message: 'Q4 report' } },
-  { name: 'Leo Martins', color: '#F59E0B', avatar: { model: 'rogue', pet: 'bunny' }, plant: 1, status: { state: 'brb' } },
+  { name: 'Aisha Khan', color: '#A78BFA', avatar: { model: 'barbarian', pet: 'lion' }, plant: 27, status: { state: 'dnd', message: 'Q4 report' } },
+  { name: 'Leo Martins', color: '#F59E0B', avatar: { model: 'rogue', pet: 'tiger' }, plant: 1, status: { state: 'brb' } },
   { name: 'Mei Lin', color: '#14B8A6', avatar: { model: 'hooded', pet: 'chick' }, plant: 45, status: { state: 'desk' } },
 ]
 

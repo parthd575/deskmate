@@ -8,9 +8,9 @@ const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness
 const LOOKS = {
   cat:   { body: '#F2A65A', belly: '#FFE3C2', dark: '#C9773A', ear: 'pointy', tail: 'long', nose: '#F28B9B' },
   dog:   { body: '#C98B5B', belly: '#F6E2CC', dark: '#7A4E31', ear: 'floppy', tail: 'short', nose: '#2b2b2b' },
-  bunny: { body: '#F4F1EE', belly: '#FFFFFF', dark: '#D9CFC7', ear: 'long', tail: 'puff', nose: '#F28B9B' },
   chick: { body: '#FFD34E', belly: '#FFE89A', dark: '#F2B705', ear: 'none', tail: 'none', nose: '#FF9F1C', bird: true },
-  fox:   { body: '#E8743B', belly: '#FFF4E8', dark: '#5B3A29', ear: 'pointy', tail: 'bushy', nose: '#2b2b2b' },
+  lion:  { body: '#E2A94A', belly: '#F7DFA8', dark: '#8A4A1C', ear: 'round', tail: 'tuft', nose: '#5B3A29', mane: true },
+  tiger: { body: '#F08A24', belly: '#FFF6EC', dark: '#2B1D14', ear: 'round', tail: 'striped', nose: '#E88A8A', stripes: true },
 };
 
 export const PET_KINDS = Object.keys(LOOKS);
@@ -71,14 +71,52 @@ export class Pet {
         const e = add(S(0.03, 14, 10), M.body, this.head, [sx * 0.035, 0.12, -0.01]); e.scale.set(0.7, 2.6, 0.5); e.rotation.z = -sx * 0.15;
         add(S(0.018, 10, 8), M.nose, this.head, [sx * 0.035, 0.12, 0.004]).scale.set(0.6, 2.3, 0.3);
       }
+      if (L.ear === 'round') for (const sx of [-1, 1]) {
+        add(S(0.03, 14, 10), M.body, this.head, [sx * 0.062, 0.07, -0.01]).scale.set(1, 1, 0.55);
+        add(S(0.017, 10, 8), M.belly, this.head, [sx * 0.062, 0.07, 0.004]).scale.set(1, 1, 0.4);
+      }
+      if (L.mane) {
+        // a big fluffy mane: a ring of tufts framing the face, a bit behind it
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2;
+          add(S(0.045, 14, 10), M.dark, this.head, [Math.cos(a) * 0.085, Math.sin(a) * 0.085 + 0.005, -0.03]).scale.set(1, 1, 0.8);
+        }
+        add(S(0.09, 18, 14), M.dark, this.head, [0, 0.005, -0.055]).scale.set(1.15, 1.15, 0.7);
+        add(S(0.05, 14, 10), M.dark, this.body, [0, 0.16, 0.07]).scale.set(1.3, 1, 1);   // chest ruff
+      }
+      if (L.stripes) {
+        // dark stripes over the back and a few on the forehead
+        for (const z of [-0.09, -0.045, 0.0, 0.045]) {
+          for (const sx of [-1, 1]) {   // down each flank
+            const st = add(S(0.03, 10, 8), M.dark, this.body, [sx * 0.086, 0.118, z]);
+            st.scale.set(0.18, 1.25, 0.28);
+            st.rotation.z = sx * 0.25;
+          }
+          const top = add(S(0.03, 10, 8), M.dark, this.body, [0, 0.192, z]);   // across the back
+          top.scale.set(1.5, 0.18, 0.28);
+        }
+        for (const [x, r] of [[-0.022, 0.3], [0, 0], [0.022, -0.3]]) {
+          const f = add(new THREE.BoxGeometry(0.008, 0.035, 0.01), M.dark, this.head, [x, 0.06, 0.06]);
+          f.rotation.z = r;
+        }
+        for (const sx of [-1, 1]) {
+          const c = add(new THREE.BoxGeometry(0.03, 0.007, 0.01), M.dark, this.head, [sx * 0.075, 0.0, 0.035]);
+          c.rotation.y = sx * 0.9;
+        }
+      }
       // tail
       this.tail = new THREE.Group(); this.tail.position.set(0, 0.13, -0.13); this.body.add(this.tail);
       if (L.tail === 'long') { const t = add(new THREE.CylinderGeometry(0.014, 0.02, 0.16, 8), M.body, this.tail, [0, 0.07, -0.02]); t.rotation.x = -0.5; }
       if (L.tail === 'short') { const t = add(new THREE.CylinderGeometry(0.016, 0.022, 0.07, 8), M.body, this.tail, [0, 0.03, -0.01]); t.rotation.x = -0.7; }
-      if (L.tail === 'puff') add(S(0.035, 14, 10), M.belly, this.tail, [0, 0, -0.01]);
-      if (L.tail === 'bushy') {
-        const t = add(S(0.05, 16, 12), M.body, this.tail, [0, 0.04, -0.05]); t.scale.set(0.8, 0.8, 1.9); t.rotation.x = 0.5;
-        add(S(0.03, 12, 10), M.belly, this.tail, [0, 0.07, -0.13]);
+      if (L.tail === 'tuft' || L.tail === 'striped') {
+        // long thin tail curving up; a lion's ends in a dark tuft, a tiger's has rings
+        const t = add(new THREE.CylinderGeometry(0.011, 0.016, 0.2, 8), M.body, this.tail, [0, 0.07, -0.05]);
+        t.rotation.x = -0.75;
+        if (L.tail === 'tuft') add(S(0.026, 12, 10), M.dark, this.tail, [0, 0.145, -0.115]).scale.set(1, 1.3, 1);
+        else for (const k of [0.3, 0.55, 0.8]) {
+          const ring = add(new THREE.TorusGeometry(0.0135, 0.004, 6, 12), M.dark, this.tail, [0, 0.07 + (k - 0.5) * 0.2 * Math.cos(0.75), -0.05 - (k - 0.5) * 0.2 * Math.sin(0.75)]);
+          ring.rotation.x = Math.PI / 2 - 0.75;
+        }
       }
     }
     // eyes (closed = squashed flat)

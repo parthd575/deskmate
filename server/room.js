@@ -22,7 +22,7 @@ const STATES = new Set(['desk', 'lunch', 'afk', 'dnd', 'meeting', 'brb', 'leave'
 // who joins a scheduled stand-up: people at their desk or focusing (not away, at lunch, BRB,
 // on leave, in another meeting, or offline)
 const STANDUP_STATES = new Set(['desk', 'dnd']);
-const PETS = new Set(['', 'none', 'cat', 'dog', 'bunny', 'chick', 'fox']);
+const PETS = new Set(['', 'none', 'cat', 'dog', 'chick', 'lion', 'tiger']);
 const KUDOS_GAP_MS = 10 * 60 * 1000;   // one kudos per person per teammate every 10 minutes
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 

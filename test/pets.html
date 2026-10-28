@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Desk pets</title>
+<style>html,body{margin:0;height:100%;background:#eef1f6}</style></head>
+<body><script type="module">
+// Every desk pet side by side (awake, then asleep with ?sleep).
+import * as THREE from '../extension/lib/three.module.min.js';
+import { addSoftLights, configureRenderer } from '../extension/lib/avatar.js';
+import { Pet, PET_KINDS } from '../extension/lib/pets.js';
+const r = new THREE.WebGLRenderer({ antialias: true }); r.setPixelRatio(2); r.setSize(innerWidth, innerHeight);
+configureRenderer(r); document.body.appendChild(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#eef1f6'); addSoftLights(scene);
+const cam = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.01, 20); cam.position.set(0, 0.55, 2.2); cam.lookAt(0, 0.12, 0);
+const pets = PET_KINDS.map((k, i) => { const p = new Pet(k); p.root.position.x = (i - (PET_KINDS.length - 1) / 2) * 0.42; p.root.rotation.y = 0.5; scene.add(p.root); return p; });
+const sleep = new URLSearchParams(location.search).has('sleep');
+let t = 0; const clock = new THREE.Clock();
+(function loop() { const dt = clock.getDelta(); t += dt; pets.forEach(p => p.update(t, dt, { sleeping: sleep })); r.render(scene, cam); requestAnimationFrame(loop); })();
+</script></body></html>

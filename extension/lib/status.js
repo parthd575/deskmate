@@ -19,9 +19,9 @@ export const PETS = [
   { id: '', label: 'None', emoji: '🚫' },
   { id: 'cat', label: 'Cat', emoji: '🐱' },
   { id: 'dog', label: 'Dog', emoji: '🐶' },
-  { id: 'bunny', label: 'Bunny', emoji: '🐰' },
   { id: 'chick', label: 'Chick', emoji: '🐥' },
-  { id: 'fox', label: 'Fox', emoji: '🦊' },
+  { id: 'lion', label: 'Lion', emoji: '🦁' },
+  { id: 'tiger', label: 'Tiger', emoji: '🐯' },
 ];
 
 export const SKIN = ['#F5D0B5', '#E8B48F', '#C68B62', '#8D5A3B', '#5C3A24'];
