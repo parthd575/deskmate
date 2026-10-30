@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "logs": "wrangler tail"
+    "deploy": "wrangler deploy && node ../scripts/release-extension.mjs",
+    "logs": "wrangler tail",
+    "deploy:server": "wrangler deploy"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

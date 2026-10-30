@@ -5,3 +5,4 @@ test/shots/
 *.zip
 .DS_Store
 .wrangler/
+dist/

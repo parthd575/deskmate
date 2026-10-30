@@ -147,8 +147,13 @@ Change `DEFAULT_SERVER` in `extension/lib/status.js` to your `wss://…workers.d
 
 ### 3. Distribute the extension
 
-- **Quick:** zip `extension/` and have people load it unpacked.
-- **Proper:** publish it as an **unlisted** item on the Chrome Web Store, or force-install it to the whole org from the Google Admin console (*Devices → Chrome → Apps & extensions*). Auto-updates come for free.
+`npm run deploy` (in `cloudflare/` or the repo root) deploys the server **and** releases the extension: it bumps the version in `extension/manifest.json`, packs `dist/Deskmate.zip`, and puts it in Google Drive at **My Drive/Deskmate/Deskmate.zip**, replacing the previous one, so the share link you've given people keeps working and always gets the newest version.
+
+- **Google Drive for desktop** (simplest): detected automatically; the zip is written over the old one and Drive syncs it as a new version of the same file.
+- **rclone** instead: `brew install rclone && rclone config` (add a Google Drive remote, e.g. `gdrive`), then `DESKMATE_RCLONE_REMOTE=gdrive:Deskmate npm run deploy`.
+- Options: `DESKMATE_DRIVE_FOLDER` (folder in My Drive, default `Deskmate`), `DESKMATE_DRIVE_DIR` (exact folder), `DESKMATE_NO_BUMP=1` (keep the version), `DESKMATE_SKIP_RELEASE=1` or `npm run deploy:server` in `cloudflare/` (server only). `npm run release:extension` does just the extension.
+
+Teammates install it by unzipping and choosing **Load unpacked** at `chrome://extensions`. For automatic updates, publish it as an **unlisted** Chrome Web Store item or force-install it from the Google Admin console (*Devices → Chrome → Apps & extensions*).
 
 ### 4. Build the Mac app
 

@@ -11,10 +11,11 @@
     "demo:live": "node test/demo.cjs --live",
     "mac": "cd companion && npm start",
     "mac:dist": "cd companion && npm run dist",
-    "zip:extension": "cd extension && zip -r ../deskmate-extension.zip . -x '*.DS_Store'",
     "cf:dev": "cd cloudflare && npx wrangler dev",
     "cf:deploy": "cd cloudflare && npx wrangler deploy",
-    "test:calls": "node test/calls.cjs"
+    "test:calls": "node test/calls.cjs",
+    "release:extension": "node scripts/release-extension.mjs",
+    "deploy": "npm --prefix cloudflare run deploy"
   },
   "devDependencies": {
     "playwright": "^1.56.0"
